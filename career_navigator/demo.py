@@ -33,6 +33,14 @@ _FIXTURES = (
             company="Commonwealth Systems", location="Remote",
             details="California residents only.", pay_text="From $20 an hour",
             provider="indeed", provider_id="REM1"),
+    Posting(url="https://www.indeed.com/viewjob?jk=REM2", title="Remote Help Desk Analyst",
+            company="Keystone Support", location="Remote",
+            details="Answer support tickets.", pay_text="$21 an hour",
+            provider="indeed", provider_id="REM2"),
+    Posting(url="https://www.indeed.com/viewjob?jk=REM3", title="Remote Systems Analyst",
+            company="Commonwealth Systems", location="Remote - Pennsylvania",
+            details="Monitor systems.", pay_text="$24 an hour",
+            provider="indeed", provider_id="REM3"),
     Posting(url="https://indeed.com.evil.example/viewjob?jk=FAKE", title="IT Help Desk",
             company="Lookalike LLC", location="Pittsburgh, PA", pay_text="$20 an hour"),
 )
@@ -44,7 +52,7 @@ def render_report() -> str:
         WORDING,
         "",
     ]
-    for ev in evaluate_postings(_FIXTURES, Policy(salary_floor_annual=41600.0)):
+    for ev in evaluate_postings(_FIXTURES, Policy()):
         p = ev.posting
         lines.append(f"[{ev.decision.status.upper()}] {p.title} — {p.company} ({p.location or 'location missing'})")
         lines.append(f"  url: {ev.identity.url} (trusted_host={ev.identity.trusted_host}, provider={ev.identity.provider})")

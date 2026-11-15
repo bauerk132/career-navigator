@@ -1,8 +1,8 @@
-"""Configurable policy for the synthetic core (conservative defaults; C9).
+"""Configurable policy for the synthetic core (C9).
 
-Salary-floor treatment of open-ended low pay and unknown-pay ranking are open
-policy decisions for Kyle (combined plan); defaults here are conservative and
-configurable, not final policy.
+Defaults encode Kyle's 2026-11-15 decisions (hof_01M7FPD05XTSBPK4T7): a $19/hour
+salary floor, Philadelphia primary alongside Pittsburgh, and remote geographic
+eligibility decided from explicit Pennsylvania evidence. Still configurable.
 """
 from dataclasses import dataclass, field
 
@@ -13,15 +13,18 @@ DEFAULT_WEIGHTS = {
     "driving_compatibility": 0.15,
 }
 
+SALARY_FLOOR_HOURLY = 19.0
+
 
 @dataclass(frozen=True)
 class Policy:
     excluded_employers: tuple[str, ...] = ()
-    primary_cities: tuple[str, ...] = ("pittsburgh",)
-    optional_cities: tuple[str, ...] = ("philadelphia",)
+    primary_cities: tuple[str, ...] = ("pittsburgh", "philadelphia")
+    optional_cities: tuple[str, ...] = ()
     allow_remote: bool = True
     remote_compatible_regions: tuple[str, ...] = ("pennsylvania", "pa")
-    salary_floor_annual: float | None = None
+    # $19/hr x 40h x 52wk (Kyle decision 2026-11-15); None disables the floor.
+    salary_floor_annual: float | None = SALARY_FLOOR_HOURLY * 40.0 * 52.0
     hours_per_week: float = 40.0
     weeks_per_year: float = 52.0
     priority_threshold: float = 60.0

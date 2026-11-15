@@ -25,7 +25,7 @@
 | `career_navigator/relevance.py` | job relevance index: configurable weights (sum=1 validated), factor+evidence, inclusive threshold edge, deterministic tie-break, no priority for review/rejected, no proficiency claims |
 | `career_navigator/pipeline.py` | identity→eligibility→relevance→rank; duplicate visibility; upstream records carried |
 | `career_navigator/demo.py`, `__main__.py` | manually invoked stdout-only synthetic demo |
-| `tests/test_urls.py` (12), `test_pay.py` (20), `test_dedup.py` (8), `test_eligibility.py` (31), `test_relevance.py` (12), `test_pipeline.py` (7) | 90 synthetic unittest tests |
+| `tests/test_urls.py` (12), `test_pay.py` (20), `test_dedup.py` (8), `test_eligibility.py` (31), `test_relevance.py` (12), `test_pipeline.py` (7), `test_policy_decisions.py` (48) | 138 synthetic unittest tests (90 at Phase 1 + 48 policy regressions; see §6) |
 | `baseline/*`, `test-output.txt`, `demo-output.txt`, `REPORT.md` | baseline + evidence artifacts |
 
 Stdlib only. No network, model, browser, background/scheduled work, persistence, or production-data access. TDD red-green per module (each batch watched failing before implementation); two test-side corrections (method-name typo; case-insensitive demo assertion).
@@ -63,4 +63,48 @@ git -C C:/Users/kbaue/Projects/JobFinder status --porcelain=v1   (before/after i
 2. **Kyle policy decisions** (combined plan): open-ended low-pay floor treatment (default: review), unknown-pay ranking (default: clarity 0, visible), Philadelphia/remote scope confirmation.
 3. **Persistence** (`career_navigator.db`), HTML report, tracker/CSV adapters, daily picks/quotas — deferred, separate scope approval.
 4. **Independent review**: per Kyle's standing feedback, no subagent dispatches; this core was built and verified in-session (TDD), not by independent goldfish reviewers. A fresh-context review pass is recommended before integration.
-5. No git commit/branch created (workspace is not a repo; integration gated; none requested).
+5. No git commit/branch created (workspace is not a repo; integration gated; none requested). *(Superseded: root commit `af99000` on `main`; policy revision on `cn/policy-decisions` — see §6.)*
+
+## 6. Policy revision (2026-11-15) — branch `cn/policy-decisions`, review candidate
+
+- **Authority:** handoff `hof_01M7FPD05XTSBPK4T7` (hermes → qoder, claimed); Kyle's three recorded decisions: `mem_01M7FP498GDPD5D5C2` (salary), `mem_01M7FP76DD2CRMCYN3` (Philadelphia), `mem_01M7FP863YA8TVBCCH` (remote PA).
+- **Base:** `af99000131740d9e1ff89560b65e640139f24d73` (clean `main`, verified; no remote, no other branches). Isolated branch `cn/policy-decisions`; **not merged, not pushed**. Independent review by Antigravity precedes any integration.
+
+### Behavior changes (defaults; all still configurable)
+
+| Decision | Implementation |
+|---|---|
+| Missing salary → Needs Review | `eligibility._pay_reason`: missing → `review` (value stays unknown, never coerced). |
+| Open-ended starting pay < $19/hr, no maximum → Needs Review | Default `salary_floor_annual = 19.0 × 40 × 52 = 39520.0`; open-ended low below floor → `review`. Bounded ranges entirely below floor **still excluded** (Kyle's confirmation covered open-ended + missing only). |
+| Philadelphia regular default | `primary_cities = ("pittsburgh", "philadelphia")`, `optional_cities = ()`; location factor raw 1.0 (was 0.6 optional). |
+| Remote explicitly open to PA → eligible | Restriction/suffix/text evidence naming Pennsylvania (statewide, abbr, residents-only, mixed lists including PA) or nationwide US scope (`US only`, `United States`, `nationwide`, `Remote - US`) → `pass`. |
+| Remote explicitly excludes PA → excluded | Other-state restrictions (names/abbrs/lists), explicit PA negation ("not available in Pennsylvania", "Pennsylvania excluded") → `exclude`. |
+| Remote unclear/unstated → Needs Review | Bare `Remote`, ambiguous regions ("East Coast"), conflicting PA + other-state evidence → `review`. No geographic restriction invented; pronoun "us" is not nationwide. |
+
+Policy outcomes never override other verified disqualifications (exclude > review > eligible unchanged). Unparseable pay and high-only open-ended ("up to") pay are **unchanged** (`info`, visible) — not covered by Kyle's decisions. Reason/evidence remains posting-side; unknowns stay unknown.
+
+### Files changed
+
+`career_navigator/policy.py` (defaults + docstring), `career_navigator/eligibility.py` (pay review, remote PA engine, state-name/abbr sets; removed superseded `_US_ONLY`/`_RESIDENTS_ONLY`), `career_navigator/demo.py` (default floor; +2 fixtures REM2 bare-remote review, REM3 PA-remote eligible), `tests/test_policy_decisions.py` (new, 48), `tests/test_eligibility.py` (6 expectations revised for the approved policy; helper default pay now `$25 an hour` so factor-isolation tests are not pulled into review by the missing-salary rule), `test-output.txt`, `demo-output.txt`, `REPORT.md`. `relevance.py` needed **no change** (city tiers are data-driven).
+
+### TDD evidence (actual commands)
+
+```
+cd career-navigator
+PYTHONDONTWRITEBYTECODE=1 py -m unittest discover -s tests        # RED
+  → Ran 138 tests — FAILED (failures=30, errors=0 after one test-helper fix)
+  → all 30 assertion failures against old policy (e.g. Philadelphia 92.5 != 82.5)
+# implementation (policy.py, eligibility.py, demo.py)
+PYTHONDONTWRITEBYTECODE=1 py -m unittest discover -s tests -v     # GREEN
+  → Ran 138 tests in 0.006s — OK   (Python 3.15.2; full log: test-output.txt)
+PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s tests
+  → Ran 138 tests in 0.006s — OK   (Python 3.12.10)
+PYTHONDONTWRITEBYTECODE=1 py -m career_navigator
+  → 11-fixture stdout report, exit 0 (demo-output.txt)
+```
+
+One real bug caught by the new tests during green: restriction capture crossed the location/details boundary ("Remote" + "US only." captured "remote us"); fixed by scanning each field separately. Refactor removed the redundant `_RESIDENTS_ONLY` pattern (subsumed by `_ONLY`); suite re-verified green on both Pythons afterwards.
+
+### Still gated (unchanged)
+
+Live JobFinder integration, real-schema verification, migrations, persistence/HTML/tracker adapters, push/merge — all require separate approval. This branch is a review candidate only.

@@ -4,7 +4,10 @@ Verified mandatory driving/license excludes; negation passes; contradiction or
 ambiguity goes to review; no mention stays unknown. Restaurant *operations*
 roles exclude, but technical roles (including restaurant-domain hybrids such as
 POS/IT) are not excluded by domain alone. Missing location is review, never a
-confident out-of-area rejection. Missing salary stays unknown.
+confident out-of-area rejection. Missing salary goes to Needs Review (Kyle
+2026-11-15); the value stays unknown. Remote geography follows explicit
+Pennsylvania evidence: open => pass, excludes => exclude, unclear/unstated =>
+review; nationwide US scope includes Pennsylvania.
 """
 import re
 
@@ -37,8 +40,35 @@ _OPERATIONS = (
     "waitress",
 )
 _RESTRICTION = re.compile(r"\b(?:reside in|live in|residents? of)\s+([a-z][a-z ]*)")
-_RESIDENTS_ONLY = re.compile(r"\b([a-z][a-z ]*)\s+residents?\s+only\b")
-_US_ONLY = re.compile(r"\b(?:us|u\.s\.|united states)\s+only\b")
+_ONLY = re.compile(r"\b([a-z][a-z ]*?)\s+only\b")
+_REMOTE_SUFFIX = re.compile(r"\bremote\b\s*[-–—(,:]\s*([a-z][a-z ,.&]*?)\s*\)?\s*$")
+_PA = re.compile(r"\bpennsylvania\b|\bpa\b")
+_PA_EXCLUDED = (
+    re.compile(r"\b(?:not|no|excluding|except|excludes?|outside)\b[^.;]{0,40}\b(?:pennsylvania|pa)\b"),
+    re.compile(r"\b(?:pennsylvania|pa)\b[^.;]{0,30}\b(?:excluded|ineligible|not eligible|not available|not accepted)\b"),
+)
+_NATIONWIDE = re.compile(
+    r"\b(?:united states|nationwide|any (?:us )?state|all (?:50 )?states)\b|\bu\.s\.|\bus\s+only\b"
+)
+_US_STATE_NAMES = frozenset({
+    "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
+    "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho",
+    "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana",
+    "maine", "maryland", "massachusetts", "michigan", "minnesota",
+    "mississippi", "missouri", "montana", "nebraska", "nevada",
+    "new hampshire", "new jersey", "new mexico", "new york",
+    "north carolina", "north dakota", "ohio", "oklahoma", "oregon",
+    "rhode island", "south carolina", "south dakota", "tennessee",
+    "texas", "utah", "vermont", "virginia", "washington",
+    "west virginia", "wisconsin", "wyoming", "district of columbia",
+})
+_US_STATE_ABBRS = frozenset({
+    "al", "ak", "az", "ar", "ca", "co", "ct", "de", "fl", "ga", "hi",
+    "id", "il", "in", "ia", "ks", "ky", "la", "me", "md", "ma", "mi",
+    "mn", "ms", "mo", "mt", "ne", "nv", "nh", "nj", "nm", "ny", "nc",
+    "nd", "oh", "ok", "or", "ri", "sc", "sd", "tn", "tx", "ut", "vt",
+    "va", "wa", "wv", "wi", "wy", "dc",
+})
 
 
 def _has_technical(text: str) -> list[str]:
@@ -75,23 +105,69 @@ def _driving_reason(text: str) -> Reason:
     return Reason("driving", "info", "no driving/license mention; unknown (not verified no-driving)")
 
 
+def _classify_region(region: str) -> str:
+    if _PA.search(region):
+        return "pa"
+    if region in {"us", "u.s.", "u.s", "usa"} or _NATIONWIDE.search(region):
+        return "nationwide"
+    tokens = set(re.findall(r"[a-z.]+", region))
+    if tokens & _US_STATE_ABBRS or any(name in region for name in _US_STATE_NAMES):
+        return "other"
+    return "unclear"
+
+
+def _remote_location_reason(loc: str, details: str, policy: Policy) -> Reason:
+    if not policy.allow_remote:
+        return Reason("location", "exclude", "remote not allowed by policy")
+    text = f"{loc} {details}"
+    regions = [
+        m.group(1).strip()
+        for field_text in (loc, details)
+        for rx in (_RESTRICTION, _ONLY)
+        for m in rx.finditer(field_text)
+    ]
+    suffix = _REMOTE_SUFFIX.search(loc)
+    if suffix:
+        regions.append(suffix.group(1).strip())
+    regions = [r for r in regions if r]
+    kinds = {_classify_region(r) for r in regions}
+    if any(rx.search(text) for rx in _PA_EXCLUDED):
+        return Reason("location", "exclude", "remote explicitly excludes Pennsylvania (posting text)")
+    pa_mentioned = bool(_PA.search(text))
+    other_mentioned = any(name in text for name in _US_STATE_NAMES)
+    if pa_mentioned and (other_mentioned or "other" in kinds):
+        return Reason("location", "review",
+                      "conflicting remote geographic evidence: Pennsylvania and other-state restriction; review")
+    if kinds:
+        if "unclear" in kinds:
+            return Reason("location", "review",
+                          f"remote geographic eligibility unclear: {', '.join(regions)}")
+        if "other" in kinds and kinds != {"other"}:
+            return Reason("location", "review",
+                          f"conflicting remote geographic restrictions: {', '.join(regions)}")
+        if "other" in kinds:
+            return Reason("location", "exclude",
+                          f"remote restricted to {', '.join(regions)}; Pennsylvania not included")
+        if "pa" in kinds:
+            return Reason("location", "pass",
+                          f"remote explicitly open to Pennsylvania: {', '.join(regions)}")
+        return Reason("location", "pass", "remote; nationwide US scope includes Pennsylvania")
+    if pa_mentioned:
+        return Reason("location", "pass", "remote explicitly open to Pennsylvania (posting text)")
+    if other_mentioned:
+        return Reason("location", "exclude", "remote limited to other state(s); Pennsylvania not included")
+    if _NATIONWIDE.search(text):
+        return Reason("location", "pass", "remote; nationwide US scope includes Pennsylvania")
+    return Reason("location", "review", "remote geographic eligibility unstated; Needs Review (not inferred)")
+
+
 def _location_reason(posting: Posting, policy: Policy) -> Reason:
     loc = clean_text(posting.location).casefold()
     details = clean_text(posting.details).casefold()
     if not loc.strip():
         return Reason("location", "review", "missing location; review, not confidently out-of-area")
     if "remote" in loc:
-        if not policy.allow_remote:
-            return Reason("location", "exclude", "remote not allowed by policy")
-        restriction = _RESTRICTION.search(details) or _RESIDENTS_ONLY.search(details)
-        if restriction:
-            region = restriction.group(1).strip()
-            if any(r in region for r in policy.remote_compatible_regions):
-                return Reason("location", "pass", f"remote; geographic restriction compatible: {region}")
-            return Reason("location", "review", f"remote; geographic restriction uncertain: {region}")
-        if _US_ONLY.search(details):
-            return Reason("location", "pass", "remote; US-only restriction compatible")
-        return Reason("location", "pass", "remote; no geographic restriction stated")
+        return _remote_location_reason(loc, details, policy)
     for city in policy.primary_cities:
         if city in loc:
             return Reason("location", "pass", f"{city} (primary)")
@@ -104,7 +180,8 @@ def _location_reason(posting: Posting, policy: Policy) -> Reason:
 def _pay_reason(posting: Posting, policy: Policy) -> Reason:
     pay = parse_pay(posting.pay_text)
     if pay.status == "missing":
-        return Reason("pay", "info", "salary missing; remains unknown (not coerced)")
+        return Reason("pay", "review",
+                      "salary not stated; Needs Review (Kyle decision 2026-11-15); value remains unknown, not coerced")
     if pay.status == "unparseable":
         return Reason("pay", "info", f"salary present but unparseable: {pay.raw!r}; remains unknown")
     if policy.salary_floor_annual is None:
@@ -116,7 +193,9 @@ def _pay_reason(posting: Posting, policy: Policy) -> Reason:
     low = annual_low(pay, hours_per_week=policy.hours_per_week, weeks_per_year=policy.weeks_per_year)
     if check is False:
         if pay.open_ended:
-            return Reason("pay", "review", f"open-ended low pay below floor (annualized low {low:.2f} < {policy.salary_floor_annual:.2f}); Kyle decision pending")
+            return Reason("pay", "review",
+                          f"open-ended low pay below floor (annualized low {low:.2f} < {policy.salary_floor_annual:.2f}); "
+                          "Needs Review (Kyle decision 2026-11-15)")
         return Reason("pay", "exclude", f"pay below floor (annualized low {low:.2f} < {policy.salary_floor_annual:.2f}, unrounded)")
     if check is None:
         return Reason("pay", "info", f"pay {pay.status}: {pay.raw!r}; floor comparison unknown, remains visible")

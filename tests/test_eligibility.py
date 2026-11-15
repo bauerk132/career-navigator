@@ -7,7 +7,9 @@ from career_navigator.policy import Policy
 
 
 def posting(title="IT Support Technician", company="Acme Tech", location="Pittsburgh, PA",
-            details="", pay_text="", **kw):
+            details="", pay_text="$25 an hour", **kw):
+    # Default pay meets Kyle's $19/hr floor so factor-isolation tests are not
+    # pulled into review by the missing-salary policy (2026-11-15).
     return Posting(url="https://x.example/1", title=title, company=company,
                    location=location, details=details, pay_text=pay_text, **kw)
 
@@ -66,21 +68,24 @@ class LocationTests(unittest.TestCase):
         self.assertEqual(d.status, "eligible")
         self.assertIn("pittsburgh", factors(d)["location"].evidence)
 
-    def test_philadelphia_optional_eligible(self):
+    def test_philadelphia_primary_eligible(self):
         d = evaluate(posting(location="Philadelphia, PA"), Policy())
         self.assertEqual(d.status, "eligible")
+        self.assertIn("philadelphia (primary)", factors(d)["location"].evidence)
 
-    def test_remote_unrestricted_eligible(self):
+    def test_remote_unstated_eligibility_is_review(self):
         d = evaluate(posting(location="Remote"), Policy())
-        self.assertEqual(d.status, "eligible")
+        self.assertEqual(d.status, "review")
+        self.assertEqual(factors(d)["location"].outcome, "review")
 
     def test_remote_compatible_state_restriction_eligible(self):
         d = evaluate(posting(location="Remote", details="Must reside in Pennsylvania."), Policy())
         self.assertEqual(d.status, "eligible")
 
-    def test_remote_incompatible_restriction_goes_to_review(self):
+    def test_remote_pa_excluding_restriction_rejected(self):
         d = evaluate(posting(location="Remote", details="California residents only."), Policy())
-        self.assertEqual(d.status, "review")
+        self.assertEqual(d.status, "rejected")
+        self.assertEqual(factors(d)["location"].outcome, "exclude")
 
     def test_missing_location_is_review_not_out_of_area(self):
         d = evaluate(posting(location=""), Policy())
@@ -153,14 +158,16 @@ class PayFloorTests(unittest.TestCase):
         d = evaluate(posting(pay_text="From $15 an hour"), Policy(salary_floor_annual=41600.0))
         self.assertEqual(d.status, "review")
 
-    def test_unknown_salary_not_excluded_stays_unknown(self):
+    def test_missing_salary_goes_to_review(self):
         d = evaluate(posting(pay_text=""), Policy(salary_floor_annual=41600.0))
-        self.assertEqual(d.status, "eligible")
+        self.assertEqual(d.status, "review")
+        self.assertEqual(factors(d)["pay"].outcome, "review")
         self.assertIn("unknown", factors(d)["pay"].evidence)
 
-    def test_no_floor_configured_no_pay_exclusion(self):
+    def test_default_floor_rejects_below_19_hourly(self):
+        self.assertEqual(Policy().salary_floor_annual, 19.0 * 40.0 * 52.0)
         d = evaluate(posting(pay_text="$15 an hour"), Policy())
-        self.assertEqual(d.status, "eligible")
+        self.assertEqual(d.status, "rejected")
 
 
 if __name__ == "__main__":

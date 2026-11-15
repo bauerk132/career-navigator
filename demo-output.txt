@@ -12,22 +12,37 @@ job relevance index (posting-side evidence only; not verified candidate fit)
     * role [pass]: technical role: technician, support, it
     * driving [info]: no driving/license mention; unknown (not verified no-driving)
     * location [pass]: pittsburgh (primary)
-    * pay [pass]: pay meets floor (annualized low 52000.00 >= 41600.00, unrounded)
+    * pay [pass]: pay meets floor (annualized low 52000.00 >= 39520.00, unrounded)
   duplicates: single
   upstream source records (not truth): {'verdict': 'ok', 'status': 'new'}
 
 [ELIGIBLE] POS Support Technician — Eat'n Park Restaurant Group (Philadelphia, PA)
   url: https://www.indeed.com/viewjob?jk=POS1 (trusted_host=True, provider=indeed)
-  relevance: 82.50/100  priority: high
+  relevance: 92.50/100  priority: high
     - technical_alignment: weight=0.40 raw=1.00 contribution=0.400 | posting mentions: pos, support, systems, technician
-    - location_fit: weight=0.25 raw=0.60 contribution=0.150 | philadelphia (optional)
+    - location_fit: weight=0.25 raw=1.00 contribution=0.250 | philadelphia (primary)
     - pay_clarity: weight=0.20 raw=1.00 contribution=0.200 | bounded pay stated: '$22 an hour'
     - driving_compatibility: weight=0.15 raw=0.50 contribution=0.075 | no driving/license mention; unknown (not verified no-driving)
     * employer [pass]: employer not on exclusion list
     * role [pass]: technical role: technician, pos, support
     * driving [info]: no driving/license mention; unknown (not verified no-driving)
-    * location [pass]: philadelphia (optional)
-    * pay [pass]: pay meets floor (annualized low 45760.00 >= 41600.00, unrounded)
+    * location [pass]: philadelphia (primary)
+    * pay [pass]: pay meets floor (annualized low 45760.00 >= 39520.00, unrounded)
+  duplicates: single
+  upstream source records (not truth): {'verdict': None, 'status': None}
+
+[REVIEW] Remote Help Desk Analyst — Keystone Support (Remote)
+  url: https://www.indeed.com/viewjob?jk=REM2 (trusted_host=True, provider=indeed)
+  relevance: 87.50/100  priority: not ranked (review/rejected)
+    - technical_alignment: weight=0.40 raw=1.00 contribution=0.400 | posting mentions: analyst, help desk, support
+    - location_fit: weight=0.25 raw=0.80 contribution=0.200 | remote
+    - pay_clarity: weight=0.20 raw=1.00 contribution=0.200 | bounded pay stated: '$21 an hour'
+    - driving_compatibility: weight=0.15 raw=0.50 contribution=0.075 | no driving/license mention; unknown (not verified no-driving)
+    * employer [pass]: employer not on exclusion list
+    * role [pass]: technical role: help desk, analyst
+    * driving [info]: no driving/license mention; unknown (not verified no-driving)
+    * location [review]: remote geographic eligibility unstated; Needs Review (not inferred)
+    * pay [pass]: pay meets floor (annualized low 43680.00 >= 39520.00, unrounded)
   duplicates: single
   upstream source records (not truth): {'verdict': None, 'status': None}
 
@@ -42,11 +57,26 @@ job relevance index (posting-side evidence only; not verified candidate fit)
     * role [pass]: technical role: help desk, it
     * driving [info]: no driving/license mention; unknown (not verified no-driving)
     * location [pass]: pittsburgh (primary)
-    * pay [pass]: pay meets floor (annualized low 41600.00 >= 41600.00, unrounded)
+    * pay [pass]: pay meets floor (annualized low 41600.00 >= 39520.00, unrounded)
   duplicates: single
   upstream source records (not truth): {'verdict': None, 'status': None}
 
-[REVIEW] Remote IT Analyst — Commonwealth Systems (Remote)
+[ELIGIBLE] Remote Systems Analyst — Commonwealth Systems (Remote - Pennsylvania)
+  url: https://www.indeed.com/viewjob?jk=REM3 (trusted_host=True, provider=indeed)
+  relevance: 74.17/100  priority: high
+    - technical_alignment: weight=0.40 raw=0.67 contribution=0.267 | posting mentions: analyst, systems
+    - location_fit: weight=0.25 raw=0.80 contribution=0.200 | remote
+    - pay_clarity: weight=0.20 raw=1.00 contribution=0.200 | bounded pay stated: '$24 an hour'
+    - driving_compatibility: weight=0.15 raw=0.50 contribution=0.075 | no driving/license mention; unknown (not verified no-driving)
+    * employer [pass]: employer not on exclusion list
+    * role [pass]: technical role: analyst, systems
+    * driving [info]: no driving/license mention; unknown (not verified no-driving)
+    * location [pass]: remote explicitly open to Pennsylvania: pennsylvania
+    * pay [pass]: pay meets floor (annualized low 49920.00 >= 39520.00, unrounded)
+  duplicates: single
+  upstream source records (not truth): {'verdict': None, 'status': None}
+
+[REJECTED] Remote IT Analyst — Commonwealth Systems (Remote)
   url: https://www.indeed.com/viewjob?jk=REM1 (trusted_host=True, provider=indeed)
   relevance: 64.17/100  priority: not ranked (review/rejected)
     - technical_alignment: weight=0.40 raw=0.67 contribution=0.267 | posting mentions: analyst, it
@@ -56,8 +86,8 @@ job relevance index (posting-side evidence only; not verified candidate fit)
     * employer [pass]: employer not on exclusion list
     * role [pass]: technical role: analyst, it
     * driving [info]: no driving/license mention; unknown (not verified no-driving)
-    * location [review]: remote; geographic restriction uncertain: california
-    * pay [pass]: pay meets floor (annualized low 41600.00 >= 41600.00, unrounded)
+    * location [exclude]: remote restricted to california residents; Pennsylvania not included
+    * pay [pass]: pay meets floor (annualized low 41600.00 >= 39520.00, unrounded)
   duplicates: single
   upstream source records (not truth): {'verdict': None, 'status': None}
 
@@ -72,7 +102,7 @@ job relevance index (posting-side evidence only; not verified candidate fit)
     * role [info]: no restaurant-operations or technical signals in title
     * driving [info]: no driving/license mention; unknown (not verified no-driving)
     * location [pass]: pittsburgh (primary)
-    * pay [pass]: pay meets floor (annualized low 45000.00 >= 41600.00, unrounded)
+    * pay [pass]: pay meets floor (annualized low 45000.00 >= 39520.00, unrounded)
   duplicates: uncertain ambiguous identity match; kept visible for review
   upstream source records (not truth): {'verdict': None, 'status': None}
 
@@ -88,7 +118,7 @@ job relevance index (posting-side evidence only; not verified candidate fit)
     * role [info]: no restaurant-operations or technical signals in title
     * driving [info]: no driving/license mention; unknown (not verified no-driving)
     * location [pass]: pittsburgh (primary)
-    * pay [pass]: pay meets floor (annualized low 45000.00 >= 41600.00, unrounded)
+    * pay [pass]: pay meets floor (annualized low 45000.00 >= 39520.00, unrounded)
   duplicates: uncertain ambiguous identity match; kept visible for review
   upstream source records (not truth): {'verdict': None, 'status': None}
 
@@ -103,7 +133,7 @@ job relevance index (posting-side evidence only; not verified candidate fit)
     * role [exclude]: restaurant operations role: restaurant, general manager
     * driving [info]: no driving/license mention; unknown (not verified no-driving)
     * location [pass]: pittsburgh (primary)
-    * pay [pass]: pay meets floor (annualized low 55000.00 >= 41600.00, unrounded)
+    * pay [pass]: pay meets floor (annualized low 55000.00 >= 39520.00, unrounded)
   duplicates: single
   upstream source records (not truth): {'verdict': None, 'status': None}
 
@@ -118,7 +148,7 @@ job relevance index (posting-side evidence only; not verified candidate fit)
     * role [info]: no restaurant-operations or technical signals in title
     * driving [exclude]: verified mandatory driving/license requirement
     * location [pass]: pittsburgh (primary)
-    * pay [exclude]: pay below floor (annualized low 37440.00 < 41600.00, unrounded)
+    * pay [exclude]: pay below floor (annualized low 37440.00 < 39520.00, unrounded)
   duplicates: single
   upstream source records (not truth): {'verdict': 'ok', 'status': None}
 
@@ -133,7 +163,7 @@ job relevance index (posting-side evidence only; not verified candidate fit)
     * role [pass]: technical role: analyst, data
     * driving [info]: no driving/license mention; unknown (not verified no-driving)
     * location [review]: missing location; review, not confidently out-of-area
-    * pay [info]: salary missing; remains unknown (not coerced)
+    * pay [review]: salary not stated; Needs Review (Kyle decision 2026-11-15); value remains unknown, not coerced
   duplicates: single
   upstream source records (not truth): {'verdict': None, 'status': None}
 

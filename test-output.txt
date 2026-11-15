@@ -18,15 +18,15 @@ test_script_injected_driving_phrase_is_ignored (test_eligibility.DrivingTests.te
 test_hybrid_pittsburgh_eligible (test_eligibility.LocationTests.test_hybrid_pittsburgh_eligible) ... ok
 test_missing_location_is_review_not_out_of_area (test_eligibility.LocationTests.test_missing_location_is_review_not_out_of_area) ... ok
 test_out_of_area_city_rejected (test_eligibility.LocationTests.test_out_of_area_city_rejected) ... ok
-test_philadelphia_optional_eligible (test_eligibility.LocationTests.test_philadelphia_optional_eligible) ... ok
+test_philadelphia_primary_eligible (test_eligibility.LocationTests.test_philadelphia_primary_eligible) ... ok
 test_pittsburgh_primary_eligible (test_eligibility.LocationTests.test_pittsburgh_primary_eligible) ... ok
 test_remote_compatible_state_restriction_eligible (test_eligibility.LocationTests.test_remote_compatible_state_restriction_eligible) ... ok
-test_remote_incompatible_restriction_goes_to_review (test_eligibility.LocationTests.test_remote_incompatible_restriction_goes_to_review) ... ok
-test_remote_unrestricted_eligible (test_eligibility.LocationTests.test_remote_unrestricted_eligible) ... ok
+test_remote_pa_excluding_restriction_rejected (test_eligibility.LocationTests.test_remote_pa_excluding_restriction_rejected) ... ok
+test_remote_unstated_eligibility_is_review (test_eligibility.LocationTests.test_remote_unstated_eligibility_is_review) ... ok
 test_bounded_below_floor_rejected (test_eligibility.PayFloorTests.test_bounded_below_floor_rejected) ... ok
-test_no_floor_configured_no_pay_exclusion (test_eligibility.PayFloorTests.test_no_floor_configured_no_pay_exclusion) ... ok
+test_default_floor_rejects_below_19_hourly (test_eligibility.PayFloorTests.test_default_floor_rejects_below_19_hourly) ... ok
+test_missing_salary_goes_to_review (test_eligibility.PayFloorTests.test_missing_salary_goes_to_review) ... ok
 test_open_ended_below_floor_is_review (test_eligibility.PayFloorTests.test_open_ended_below_floor_is_review) ... ok
-test_unknown_salary_not_excluded_stays_unknown (test_eligibility.PayFloorTests.test_unknown_salary_not_excluded_stays_unknown) ... ok
 test_excluded_employer_case_insensitive (test_eligibility.RoleTests.test_excluded_employer_case_insensitive) ... ok
 test_hyphenated_food_service_it_analyst_allowed (test_eligibility.RoleTests.test_hyphenated_food_service_it_analyst_allowed) ... ok
 test_kitchen_manager_excluded (test_eligibility.RoleTests.test_kitchen_manager_excluded) ... ok
@@ -64,6 +64,54 @@ test_lookalike_url_provenance_retained (test_pipeline.PipelineTests.test_lookali
 test_ordering_deterministic_regardless_of_input_order (test_pipeline.PipelineTests.test_ordering_deterministic_regardless_of_input_order) ... ok
 test_uncertain_duplicates_both_visible (test_pipeline.PipelineTests.test_uncertain_duplicates_both_visible) ... ok
 test_upstream_records_preserved_but_cn_decides (test_pipeline.PipelineTests.test_upstream_records_preserved_but_cn_decides) ... ok
+test_philadelphia_eligible_with_primary_evidence (test_policy_decisions.PhiladelphiaDecisionTests.test_philadelphia_eligible_with_primary_evidence) ... ok
+test_philadelphia_is_primary_by_default (test_policy_decisions.PhiladelphiaDecisionTests.test_philadelphia_is_primary_by_default) ... ok
+test_philadelphia_missing_salary_is_review (test_policy_decisions.PhiladelphiaDecisionTests.test_philadelphia_missing_salary_is_review) ... ok
+test_philadelphia_relevance_equals_pittsburgh (test_policy_decisions.PhiladelphiaDecisionTests.test_philadelphia_relevance_equals_pittsburgh) ... ok
+test_philadelphia_still_configurable_out (test_policy_decisions.PhiladelphiaDecisionTests.test_philadelphia_still_configurable_out) ... ok
+test_pittsburgh_still_primary (test_policy_decisions.PhiladelphiaDecisionTests.test_pittsburgh_still_primary) ... ok
+test_allow_remote_false_still_excludes (test_policy_decisions.RemoteDecisionTests.test_allow_remote_false_still_excludes) ... ok
+test_non_remote_city_path_unaffected (test_policy_decisions.RemoteDecisionTests.test_non_remote_city_path_unaffected) ... ok
+test_remote_conflicting_pa_and_other_state_is_review (test_policy_decisions.RemoteDecisionTests.test_remote_conflicting_pa_and_other_state_is_review) ... ok
+test_remote_excluded_gets_no_priority (test_policy_decisions.RemoteDecisionTests.test_remote_excluded_gets_no_priority) ... ok
+test_remote_exclusion_overrides_good_pay (test_policy_decisions.RemoteDecisionTests.test_remote_exclusion_overrides_good_pay) ... ok
+test_remote_explicit_pa_exclusion_rejected (test_policy_decisions.RemoteDecisionTests.test_remote_explicit_pa_exclusion_rejected) ... ok
+test_remote_nationwide_united_states_eligible (test_policy_decisions.RemoteDecisionTests.test_remote_nationwide_united_states_eligible) ... ok
+test_remote_nationwide_word_eligible (test_policy_decisions.RemoteDecisionTests.test_remote_nationwide_word_eligible) ... ok
+test_remote_other_state_abbr_rejected (test_policy_decisions.RemoteDecisionTests.test_remote_other_state_abbr_rejected) ... ok
+test_remote_other_state_reside_rejected (test_policy_decisions.RemoteDecisionTests.test_remote_other_state_reside_rejected) ... ok
+test_remote_other_state_residents_only_rejected (test_policy_decisions.RemoteDecisionTests.test_remote_other_state_residents_only_rejected) ... ok
+test_remote_pa_abbr_eligible (test_policy_decisions.RemoteDecisionTests.test_remote_pa_abbr_eligible) ... ok
+test_remote_pa_eligible_does_not_override_cdl (test_policy_decisions.RemoteDecisionTests.test_remote_pa_eligible_does_not_override_cdl) ... ok
+test_remote_pa_eligible_missing_salary_is_review (test_policy_decisions.RemoteDecisionTests.test_remote_pa_eligible_missing_salary_is_review) ... ok
+test_remote_pa_excluded_word_rejected (test_policy_decisions.RemoteDecisionTests.test_remote_pa_excluded_word_rejected) ... ok
+test_remote_pa_in_mixed_state_list_eligible (test_policy_decisions.RemoteDecisionTests.test_remote_pa_in_mixed_state_list_eligible) ... ok
+test_remote_pa_reside_restriction_eligible (test_policy_decisions.RemoteDecisionTests.test_remote_pa_reside_restriction_eligible) ... ok
+test_remote_pa_residents_only_eligible (test_policy_decisions.RemoteDecisionTests.test_remote_pa_residents_only_eligible) ... ok
+test_remote_pa_statewide_eligible (test_policy_decisions.RemoteDecisionTests.test_remote_pa_statewide_eligible) ... ok
+test_remote_pronoun_us_is_not_nationwide (test_policy_decisions.RemoteDecisionTests.test_remote_pronoun_us_is_not_nationwide) ... ok
+test_remote_review_does_not_override_restaurant_exclusion (test_policy_decisions.RemoteDecisionTests.test_remote_review_does_not_override_restaurant_exclusion) ... ok
+test_remote_review_gets_no_priority (test_policy_decisions.RemoteDecisionTests.test_remote_review_gets_no_priority) ... ok
+test_remote_state_list_without_pa_rejected (test_policy_decisions.RemoteDecisionTests.test_remote_state_list_without_pa_rejected) ... ok
+test_remote_unclear_region_is_review (test_policy_decisions.RemoteDecisionTests.test_remote_unclear_region_is_review) ... ok
+test_remote_unstated_eligibility_is_review (test_policy_decisions.RemoteDecisionTests.test_remote_unstated_eligibility_is_review) ... ok
+test_remote_us_only_eligible (test_policy_decisions.RemoteDecisionTests.test_remote_us_only_eligible) ... ok
+test_remote_us_suffix_eligible (test_policy_decisions.RemoteDecisionTests.test_remote_us_suffix_eligible) ... ok
+test_bounded_above_floor_is_eligible (test_policy_decisions.SalaryDecisionTests.test_bounded_above_floor_is_eligible) ... ok
+test_bounded_at_floor_is_eligible_inclusive_boundary (test_policy_decisions.SalaryDecisionTests.test_bounded_at_floor_is_eligible_inclusive_boundary) ... ok
+test_bounded_below_floor_still_rejected (test_policy_decisions.SalaryDecisionTests.test_bounded_below_floor_still_rejected) ... ok
+test_default_floor_is_kyle_19_hourly (test_policy_decisions.SalaryDecisionTests.test_default_floor_is_kyle_19_hourly) ... ok
+test_floor_still_configurable_custom_value (test_policy_decisions.SalaryDecisionTests.test_floor_still_configurable_custom_value) ... ok
+test_floor_still_configurable_none_disables (test_policy_decisions.SalaryDecisionTests.test_floor_still_configurable_none_disables) ... ok
+test_missing_salary_goes_to_review (test_policy_decisions.SalaryDecisionTests.test_missing_salary_goes_to_review) ... ok
+test_missing_salary_review_does_not_override_hard_exclusion (test_policy_decisions.SalaryDecisionTests.test_missing_salary_review_does_not_override_hard_exclusion) ... ok
+test_missing_salary_review_preserves_other_pass_reasons (test_policy_decisions.SalaryDecisionTests.test_missing_salary_review_preserves_other_pass_reasons) ... ok
+test_open_ended_low_above_floor_is_eligible (test_policy_decisions.SalaryDecisionTests.test_open_ended_low_above_floor_is_eligible) ... ok
+test_open_ended_low_at_floor_is_eligible_inclusive_boundary (test_policy_decisions.SalaryDecisionTests.test_open_ended_low_at_floor_is_eligible_inclusive_boundary) ... ok
+test_open_ended_low_below_floor_is_review (test_policy_decisions.SalaryDecisionTests.test_open_ended_low_below_floor_is_review) ... ok
+test_open_ended_low_just_below_floor_is_review (test_policy_decisions.SalaryDecisionTests.test_open_ended_low_just_below_floor_is_review) ... ok
+test_unparseable_pay_unchanged_stays_unknown_visible (test_policy_decisions.SalaryDecisionTests.test_unparseable_pay_unchanged_stays_unknown_visible) ... ok
+test_up_to_open_ended_unchanged_floor_unknown (test_policy_decisions.SalaryDecisionTests.test_up_to_open_ended_unchanged_floor_unknown) ... ok
 test_ties_broken_deterministically_by_title (test_relevance.RankTests.test_ties_broken_deterministically_by_title) ... ok
 test_custom_weights_change_score (test_relevance.ScoreTests.test_custom_weights_change_score) ... ok
 test_eligible_at_threshold_is_high_inclusive_edge (test_relevance.ScoreTests.test_eligible_at_threshold_is_high_inclusive_edge) ... ok
@@ -90,6 +138,6 @@ test_provenance_original_always_retained (test_urls.CanonicalUrlTests.test_prove
 test_unknown_provider_preserved_verbatim (test_urls.CanonicalUrlTests.test_unknown_provider_preserved_verbatim) ... ok
 
 ----------------------------------------------------------------------
-Ran 90 tests in 0.004s
+Ran 138 tests in 0.006s
 
 OK
