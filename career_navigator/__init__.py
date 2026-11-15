@@ -1,0 +1,1 @@
+"""Career Navigator — isolated deterministic synthetic-only core (contract v3)."""

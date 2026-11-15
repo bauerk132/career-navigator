@@ -1,0 +1,139 @@
+Career Navigator — synthetic core demo (stdout only; synthetic fixtures, no live data)
+job relevance index (posting-side evidence only; not verified candidate fit)
+
+[ELIGIBLE] IT Support Technician — Acme Tech (Pittsburgh, PA)
+  url: https://www.indeed.com/viewjob?jk=TECH1 (trusted_host=True, provider=indeed)
+  relevance: 92.50/100  priority: high
+    - technical_alignment: weight=0.40 raw=1.00 contribution=0.400 | posting mentions: it, network, support, systems, technician
+    - location_fit: weight=0.25 raw=1.00 contribution=0.250 | pittsburgh (primary)
+    - pay_clarity: weight=0.20 raw=1.00 contribution=0.200 | bounded pay stated: '$25 an hour'
+    - driving_compatibility: weight=0.15 raw=0.50 contribution=0.075 | no driving/license mention; unknown (not verified no-driving)
+    * employer [pass]: employer not on exclusion list
+    * role [pass]: technical role: technician, support, it
+    * driving [info]: no driving/license mention; unknown (not verified no-driving)
+    * location [pass]: pittsburgh (primary)
+    * pay [pass]: pay meets floor (annualized low 52000.00 >= 41600.00, unrounded)
+  duplicates: single
+  upstream source records (not truth): {'verdict': 'ok', 'status': 'new'}
+
+[ELIGIBLE] POS Support Technician — Eat'n Park Restaurant Group (Philadelphia, PA)
+  url: https://www.indeed.com/viewjob?jk=POS1 (trusted_host=True, provider=indeed)
+  relevance: 82.50/100  priority: high
+    - technical_alignment: weight=0.40 raw=1.00 contribution=0.400 | posting mentions: pos, support, systems, technician
+    - location_fit: weight=0.25 raw=0.60 contribution=0.150 | philadelphia (optional)
+    - pay_clarity: weight=0.20 raw=1.00 contribution=0.200 | bounded pay stated: '$22 an hour'
+    - driving_compatibility: weight=0.15 raw=0.50 contribution=0.075 | no driving/license mention; unknown (not verified no-driving)
+    * employer [pass]: employer not on exclusion list
+    * role [pass]: technical role: technician, pos, support
+    * driving [info]: no driving/license mention; unknown (not verified no-driving)
+    * location [pass]: philadelphia (optional)
+    * pay [pass]: pay meets floor (annualized low 45760.00 >= 41600.00, unrounded)
+  duplicates: single
+  upstream source records (not truth): {'verdict': None, 'status': None}
+
+[ELIGIBLE] IT Help Desk — Lookalike LLC (Pittsburgh, PA)
+  url: https://indeed.com.evil.example/viewjob?jk=FAKE (trusted_host=False, provider=other)
+  relevance: 79.17/100  priority: high
+    - technical_alignment: weight=0.40 raw=0.67 contribution=0.267 | posting mentions: help desk, it
+    - location_fit: weight=0.25 raw=1.00 contribution=0.250 | pittsburgh (primary)
+    - pay_clarity: weight=0.20 raw=1.00 contribution=0.200 | bounded pay stated: '$20 an hour'
+    - driving_compatibility: weight=0.15 raw=0.50 contribution=0.075 | no driving/license mention; unknown (not verified no-driving)
+    * employer [pass]: employer not on exclusion list
+    * role [pass]: technical role: help desk, it
+    * driving [info]: no driving/license mention; unknown (not verified no-driving)
+    * location [pass]: pittsburgh (primary)
+    * pay [pass]: pay meets floor (annualized low 41600.00 >= 41600.00, unrounded)
+  duplicates: single
+  upstream source records (not truth): {'verdict': None, 'status': None}
+
+[REVIEW] Remote IT Analyst — Commonwealth Systems (Remote)
+  url: https://www.indeed.com/viewjob?jk=REM1 (trusted_host=True, provider=indeed)
+  relevance: 64.17/100  priority: not ranked (review/rejected)
+    - technical_alignment: weight=0.40 raw=0.67 contribution=0.267 | posting mentions: analyst, it
+    - location_fit: weight=0.25 raw=0.80 contribution=0.200 | remote
+    - pay_clarity: weight=0.20 raw=0.50 contribution=0.100 | open-ended pay stated: 'From $20 an hour'
+    - driving_compatibility: weight=0.15 raw=0.50 contribution=0.075 | no driving/license mention; unknown (not verified no-driving)
+    * employer [pass]: employer not on exclusion list
+    * role [pass]: technical role: analyst, it
+    * driving [info]: no driving/license mention; unknown (not verified no-driving)
+    * location [review]: remote; geographic restriction uncertain: california
+    * pay [pass]: pay meets floor (annualized low 41600.00 >= 41600.00, unrounded)
+  duplicates: single
+  upstream source records (not truth): {'verdict': None, 'status': None}
+
+[ELIGIBLE] Cafe Manager — Morning Brew (Pittsburgh, PA)
+  url: https://www.indeed.com/viewjob?jk=DUP1 (trusted_host=True, provider=indeed)
+  relevance: 52.50/100  priority: standard
+    - technical_alignment: weight=0.40 raw=0.00 contribution=0.000 | posting mentions no target technical terms
+    - location_fit: weight=0.25 raw=1.00 contribution=0.250 | pittsburgh (primary)
+    - pay_clarity: weight=0.20 raw=1.00 contribution=0.200 | bounded pay stated: '$45,000 a year'
+    - driving_compatibility: weight=0.15 raw=0.50 contribution=0.075 | no driving/license mention; unknown (not verified no-driving)
+    * employer [pass]: employer not on exclusion list
+    * role [info]: no restaurant-operations or technical signals in title
+    * driving [info]: no driving/license mention; unknown (not verified no-driving)
+    * location [pass]: pittsburgh (primary)
+    * pay [pass]: pay meets floor (annualized low 45000.00 >= 41600.00, unrounded)
+  duplicates: uncertain ambiguous identity match; kept visible for review
+  upstream source records (not truth): {'verdict': None, 'status': None}
+
+[ELIGIBLE] Café Supervisor — Morning Brew (Pittsburgh, PA)
+  url: https://www.indeed.com/viewjob?vjk=DUP1 (trusted_host=True, provider=indeed)
+  original: https://www.indeed.com/viewjob?vjk=DUP1&jk=OTHER
+  relevance: 52.50/100  priority: standard
+    - technical_alignment: weight=0.40 raw=0.00 contribution=0.000 | posting mentions no target technical terms
+    - location_fit: weight=0.25 raw=1.00 contribution=0.250 | pittsburgh (primary)
+    - pay_clarity: weight=0.20 raw=1.00 contribution=0.200 | bounded pay stated: '$45,000 a year'
+    - driving_compatibility: weight=0.15 raw=0.50 contribution=0.075 | no driving/license mention; unknown (not verified no-driving)
+    * employer [pass]: employer not on exclusion list
+    * role [info]: no restaurant-operations or technical signals in title
+    * driving [info]: no driving/license mention; unknown (not verified no-driving)
+    * location [pass]: pittsburgh (primary)
+    * pay [pass]: pay meets floor (annualized low 45000.00 >= 41600.00, unrounded)
+  duplicates: uncertain ambiguous identity match; kept visible for review
+  upstream source records (not truth): {'verdict': None, 'status': None}
+
+[REJECTED] Restaurant General Manager — Diner Corp (Pittsburgh, PA)
+  url: https://www.indeed.com/viewjob?jk=REST1 (trusted_host=True, provider=indeed)
+  relevance: 52.50/100  priority: not ranked (review/rejected)
+    - technical_alignment: weight=0.40 raw=0.00 contribution=0.000 | posting mentions no target technical terms
+    - location_fit: weight=0.25 raw=1.00 contribution=0.250 | pittsburgh (primary)
+    - pay_clarity: weight=0.20 raw=1.00 contribution=0.200 | bounded pay stated: '$55,000 a year'
+    - driving_compatibility: weight=0.15 raw=0.50 contribution=0.075 | no driving/license mention; unknown (not verified no-driving)
+    * employer [pass]: employer not on exclusion list
+    * role [exclude]: restaurant operations role: restaurant, general manager
+    * driving [info]: no driving/license mention; unknown (not verified no-driving)
+    * location [pass]: pittsburgh (primary)
+    * pay [pass]: pay meets floor (annualized low 55000.00 >= 41600.00, unrounded)
+  duplicates: single
+  upstream source records (not truth): {'verdict': None, 'status': None}
+
+[REJECTED] Delivery Driver — QuickShip (Pittsburgh, PA)
+  url: https://www.indeed.com/viewjob?jk=DRV1 (trusted_host=True, provider=indeed)
+  relevance: 45.00/100  priority: not ranked (review/rejected)
+    - technical_alignment: weight=0.40 raw=0.00 contribution=0.000 | posting mentions no target technical terms
+    - location_fit: weight=0.25 raw=1.00 contribution=0.250 | pittsburgh (primary)
+    - pay_clarity: weight=0.20 raw=1.00 contribution=0.200 | bounded pay stated: '$18 an hour'
+    - driving_compatibility: weight=0.15 raw=0.00 contribution=0.000 | verified mandatory driving/license requirement
+    * employer [pass]: employer not on exclusion list
+    * role [info]: no restaurant-operations or technical signals in title
+    * driving [exclude]: verified mandatory driving/license requirement
+    * location [pass]: pittsburgh (primary)
+    * pay [exclude]: pay below floor (annualized low 37440.00 < 41600.00, unrounded)
+  duplicates: single
+  upstream source records (not truth): {'verdict': 'ok', 'status': None}
+
+[REVIEW] Data Analyst — Bridge Analytics (location missing)
+  url: https://www.indeed.com/viewjob?jk=MISS1 (trusted_host=True, provider=indeed)
+  relevance: 34.17/100  priority: not ranked (review/rejected)
+    - technical_alignment: weight=0.40 raw=0.67 contribution=0.267 | posting mentions: analyst, data
+    - location_fit: weight=0.25 raw=0.00 contribution=0.000 | location missing; unknown
+    - pay_clarity: weight=0.20 raw=0.00 contribution=0.000 | salary unknown; remains unknown (not fabricated)
+    - driving_compatibility: weight=0.15 raw=0.50 contribution=0.075 | no driving/license mention; unknown (not verified no-driving)
+    * employer [pass]: employer not on exclusion list
+    * role [pass]: technical role: analyst, data
+    * driving [info]: no driving/license mention; unknown (not verified no-driving)
+    * location [review]: missing location; review, not confidently out-of-area
+    * pay [info]: salary missing; remains unknown (not coerced)
+  duplicates: single
+  upstream source records (not truth): {'verdict': None, 'status': None}
+
