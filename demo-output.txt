@@ -86,7 +86,7 @@ job relevance index (posting-side evidence only; not verified candidate fit)
     * employer [pass]: employer not on exclusion list
     * role [pass]: technical role: analyst, it
     * driving [info]: no driving/license mention; unknown (not verified no-driving)
-    * location [exclude]: remote restricted to california residents; Pennsylvania not included
+    * location [exclude]: remote restricted to california; Pennsylvania not included
     * pay [pass]: pay meets floor (annualized low 41600.00 >= 39520.00, unrounded)
   duplicates: single
   upstream source records (not truth): {'verdict': None, 'status': None}

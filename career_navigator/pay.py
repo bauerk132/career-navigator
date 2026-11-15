@@ -67,6 +67,23 @@ def annual_low(
     return None
 
 
+def annual_high(
+    pay: PayFacts, *, hours_per_week: float = 40.0, weeks_per_year: float = 52.0
+) -> float | None:
+    """Annualized high pay, or None when unknown. Unrounded."""
+    if pay.high is None or pay.status in ("missing", "unparseable"):
+        return None
+    if pay.unit == "hour":
+        return pay.high * hours_per_week * weeks_per_year
+    if pay.unit == "week":
+        return pay.high * weeks_per_year
+    if pay.unit == "month":
+        return pay.high * 12.0
+    if pay.unit == "year":
+        return pay.high
+    return None
+
+
 def floor_check(
     pay: PayFacts, floor_annual: float, *, hours_per_week: float = 40.0, weeks_per_year: float = 52.0
 ) -> bool | None:

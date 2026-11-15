@@ -108,3 +108,34 @@ One real bug caught by the new tests during green: restriction capture crossed t
 ### Still gated (unchanged)
 
 Live JobFinder integration, real-schema verification, migrations, persistence/HTML/tracker adapters, push/merge — all require separate approval. This branch is a review candidate only.
+
+## 7. Fix Round 1 (2026-11-15) — branch `cn/fix-round-1-qoder`, review candidate
+
+- **Authority:** ChatGPT coordinator handoff "Career Navigator — Policy Fix Round 1" (P1), resolving Antigravity G2 defects on `6da5663`; G2-03 approved by Kyle 2026-11-15.
+- **Isolation:** sibling worktree `career-navigator-fix-round-1/` off `6da5663`. The main worktree's uncommitted Hermes fix attempt (Sol-blocked) was left untouched. Not merged, not pushed.
+
+### Fixes
+
+| Defect | Implementation |
+|---|---|
+| G2-01 non-geographic "only" | Open `_ONLY` capture replaced by anchored `_RESIDENTS_ONLY` + `_GEO_ONLY` with vocabulary validation (`_is_geo_only`): every token must be geographic or a candidate-scope connector, and at least one token must be a collision-safe geographic term (IN/OR/ME/ID/OH/OK/HI alone never qualify). "Python only", "Valid ID only", "Bachelors or higher only", "Full time only" invent no region. |
+| G2-02 incidental state mentions | Unanchored `other_mentioned` substring scan removed; conflict/exclusion now require an anchored restriction region. `_RESTRICTION` matches in sentences whose subject is customers/clients/company/headquarters/incorporation (and no candidate context) are skipped. Nationwide fallback uses `_NATIONWIDE_TEXT` (pronoun "us only" is not nationwide). Nationwide + CA HQ / DE incorporation → eligible; nationwide + explicit PA exclusion → excluded; unverified remote → review. |
+| G2-03 bounded straddle (Kyle-approved) | New `pay.annual_high` (mirrors `annual_low`, unrounded, explicit 40h/52w). Bounded range with annualized low < floor ≤ annualized high → review. Entirely below floor still excluded; at/above floor still eligible; open-ended/missing rules unchanged; configured floor honored. |
+| G2-04 | Not implemented (scope rule): "Remote - Pittsburgh/Philadelphia" remains review; documented follow-up. |
+
+### TDD evidence
+
+- RED on pristine `6da5663` (temp `git archive` export + new test file): `Ran 174 tests — FAILED (failures=38, errors=9)`; all 47 from `tests/test_fix_round_1.py` (9 errors = `annual_high` absent on base); original 138 pass on base.
+- GREEN: `py -B -m unittest discover -s tests` → 174 OK (Python 3.15.2); `python -B` → 174 OK (Python 3.12.10). Zero existing assertions modified.
+- 66-case adversarial matrix (hand-derived expectations): all match. Demo regenerated: only change is REM1 evidence wording ("california residents" → "california"); statuses/ranking identical.
+
+### Files changed
+
+`career_navigator/eligibility.py`, `career_navigator/pay.py` (+`annual_high`), `tests/test_fix_round_1.py` (new, 36 methods), `test-output.txt`, `demo-output.txt` (regenerated), `REPORT.md` (§7).
+
+### Limitations / follow-ups
+
+- Bare state mentions without restriction language ("Remote" + "Texas") now → review (was exclude; safe direction). Unanchored phrasings ("We hire in Texas.") → review.
+- `_RESTRICTION` anchors limited to reside in / live in / residents of; incidental-subject guard is a sentence-prefix heuristic.
+- G2-04 remote-city scope expansion deferred.
+- Independent G1/G2 review of this commit pending; live integration/merge still gated.

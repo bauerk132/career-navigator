@@ -37,6 +37,42 @@ test_restaurant_pos_technician_technical_precedence (test_eligibility.RoleTests.
 test_restaurant_shift_leader_excluded (test_eligibility.RoleTests.test_restaurant_shift_leader_excluded) ... ok
 test_upstream_ok_does_not_override_cn_exclusion (test_eligibility.SourceRecordTests.test_upstream_ok_does_not_override_cn_exclusion) ... ok
 test_upstream_rejected_does_not_override_cn_eligibility (test_eligibility.SourceRecordTests.test_upstream_rejected_does_not_override_cn_eligibility) ... ok
+test_annual_range_high (test_fix_round_1.AnnualHighTests.test_annual_range_high) ... ok
+test_explicit_conversion_assumptions (test_fix_round_1.AnnualHighTests.test_explicit_conversion_assumptions) ... ok
+test_hourly_range_high_annualized (test_fix_round_1.AnnualHighTests.test_hourly_range_high_annualized) ... ok
+test_missing_high_unknown (test_fix_round_1.AnnualHighTests.test_missing_high_unknown) ... ok
+test_monthly_high_annualized (test_fix_round_1.AnnualHighTests.test_monthly_high_annualized) ... ok
+test_open_ended_from_high_unknown (test_fix_round_1.AnnualHighTests.test_open_ended_from_high_unknown) ... ok
+test_unparseable_high_unknown (test_fix_round_1.AnnualHighTests.test_unparseable_high_unknown) ... ok
+test_up_to_high_known (test_fix_round_1.AnnualHighTests.test_up_to_high_known) ... ok
+test_weekly_high_annualized (test_fix_round_1.AnnualHighTests.test_weekly_high_annualized) ... ok
+test_candidate_scoped_other_state_conflicts_with_pa_suffix (test_fix_round_1.G201CandidateScopedOnlyTests.test_candidate_scoped_other_state_conflicts_with_pa_suffix) ... ok
+test_candidate_scoped_pa_only_eligible (test_fix_round_1.G201CandidateScopedOnlyTests.test_candidate_scoped_pa_only_eligible) ... ok
+test_candidate_scoped_state_only_still_excludes (test_fix_round_1.G201CandidateScopedOnlyTests.test_candidate_scoped_state_only_still_excludes) ... ok
+test_candidate_scoped_us_only_is_nationwide_not_other (test_fix_round_1.G201CandidateScopedOnlyTests.test_candidate_scoped_us_only_is_nationwide_not_other) ... ok
+test_candidate_subject_with_non_geo_content_invents_nothing (test_fix_round_1.G201CandidateScopedOnlyTests.test_candidate_subject_with_non_geo_content_invents_nothing) ... ok
+test_bare_remote_non_geo_phrase_invents_no_region (test_fix_round_1.G201NonGeographicOnlyTests.test_bare_remote_non_geo_phrase_invents_no_region) ... ok
+test_genuine_geographic_only_still_classifies (test_fix_round_1.G201NonGeographicOnlyTests.test_genuine_geographic_only_still_classifies) ... ok
+test_non_geo_phrase_does_not_degrade_explicit_pa (test_fix_round_1.G201NonGeographicOnlyTests.test_non_geo_phrase_does_not_degrade_explicit_pa) ... ok
+test_non_geo_phrase_does_not_degrade_nationwide (test_fix_round_1.G201NonGeographicOnlyTests.test_non_geo_phrase_does_not_degrade_nationwide) ... ok
+test_pronoun_us_only_phrase_is_not_nationwide (test_fix_round_1.G201NonGeographicOnlyTests.test_pronoun_us_only_phrase_is_not_nationwide) ... ok
+test_candidate_residency_restriction_still_excludes (test_fix_round_1.G202NationwideIncidentalTests.test_candidate_residency_restriction_still_excludes) ... ok
+test_client_location_invents_no_restriction (test_fix_round_1.G202NationwideIncidentalTests.test_client_location_invents_no_restriction) ... ok
+test_explicit_pa_with_incidental_headquarters_eligible (test_fix_round_1.G202NationwideIncidentalTests.test_explicit_pa_with_incidental_headquarters_eligible) ... ok
+test_genuine_restriction_after_incidental_sentence_excludes (test_fix_round_1.G202NationwideIncidentalTests.test_genuine_restriction_after_incidental_sentence_excludes) ... ok
+test_nationwide_with_california_headquarters_eligible (test_fix_round_1.G202NationwideIncidentalTests.test_nationwide_with_california_headquarters_eligible) ... ok
+test_nationwide_with_delaware_incorporation_eligible (test_fix_round_1.G202NationwideIncidentalTests.test_nationwide_with_delaware_incorporation_eligible) ... ok
+test_nationwide_with_explicit_pa_exclusion_rejected (test_fix_round_1.G202NationwideIncidentalTests.test_nationwide_with_explicit_pa_exclusion_rejected) ... ok
+test_unverified_remote_eligibility_still_review (test_fix_round_1.G202NationwideIncidentalTests.test_unverified_remote_eligibility_still_review) ... ok
+test_bounded_range_at_or_above_floor_eligible (test_fix_round_1.G203SalaryStraddleTests.test_bounded_range_at_or_above_floor_eligible) ... ok
+test_bounded_range_entirely_below_floor_rejected (test_fix_round_1.G203SalaryStraddleTests.test_bounded_range_entirely_below_floor_rejected) ... ok
+test_bounded_range_straddling_floor_is_review (test_fix_round_1.G203SalaryStraddleTests.test_bounded_range_straddling_floor_is_review) ... ok
+test_missing_salary_still_review (test_fix_round_1.G203SalaryStraddleTests.test_missing_salary_still_review) ... ok
+test_no_floor_configured_straddle_stays_visible (test_fix_round_1.G203SalaryStraddleTests.test_no_floor_configured_straddle_stays_visible) ... ok
+test_open_ended_below_floor_still_review (test_fix_round_1.G203SalaryStraddleTests.test_open_ended_below_floor_still_review) ... ok
+test_straddle_review_does_not_override_cdl_exclusion (test_fix_round_1.G203SalaryStraddleTests.test_straddle_review_does_not_override_cdl_exclusion) ... ok
+test_straddle_review_preserves_other_factor_outcomes (test_fix_round_1.G203SalaryStraddleTests.test_straddle_review_preserves_other_factor_outcomes) ... ok
+test_straddle_rule_uses_configured_floor (test_fix_round_1.G203SalaryStraddleTests.test_straddle_rule_uses_configured_floor) ... ok
 test_conversion_assumptions_are_explicit (test_pay.FloorTests.test_conversion_assumptions_are_explicit) ... ok
 test_exact_floor_passes (test_pay.FloorTests.test_exact_floor_passes) ... ok
 test_missing_pay_floor_is_unknown_not_false (test_pay.FloorTests.test_missing_pay_floor_is_unknown_not_false) ... ok
@@ -138,6 +174,6 @@ test_provenance_original_always_retained (test_urls.CanonicalUrlTests.test_prove
 test_unknown_provider_preserved_verbatim (test_urls.CanonicalUrlTests.test_unknown_provider_preserved_verbatim) ... ok
 
 ----------------------------------------------------------------------
-Ran 138 tests in 0.006s
+Ran 174 tests in 0.009s
 
 OK

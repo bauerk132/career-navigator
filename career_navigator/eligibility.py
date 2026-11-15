@@ -5,14 +5,16 @@ ambiguity goes to review; no mention stays unknown. Restaurant *operations*
 roles exclude, but technical roles (including restaurant-domain hybrids such as
 POS/IT) are not excluded by domain alone. Missing location is review, never a
 confident out-of-area rejection. Missing salary goes to Needs Review (Kyle
-2026-11-15); the value stays unknown. Remote geography follows explicit
+2026-11-15); the value stays unknown. Bounded pay ranges straddling the floor
+go to Needs Review (Kyle 2026-11-15). Remote geography follows explicit
 Pennsylvania evidence: open => pass, excludes => exclude, unclear/unstated =>
-review; nationwide US scope includes Pennsylvania.
+review; nationwide US scope includes Pennsylvania. Geographic "only" phrases
+must be genuinely geographic; incidental state mentions never restrict.
 """
 import re
 
 from .models import Decision, Posting, Reason
-from .pay import annual_low, floor_check, parse_pay
+from .pay import annual_high, annual_low, floor_check, parse_pay
 from .policy import Policy
 from .text import clean_text
 
@@ -40,7 +42,8 @@ _OPERATIONS = (
     "waitress",
 )
 _RESTRICTION = re.compile(r"\b(?:reside in|live in|residents? of)\s+([a-z][a-z ]*)")
-_ONLY = re.compile(r"\b([a-z][a-z ]*?)\s+only\b")
+_RESIDENTS_ONLY = re.compile(r"\b([a-z][a-z ]*?)\s+residents?\s+only\b")
+_GEO_ONLY = re.compile(r"\b([a-z][a-z ,.&]*?)\s+only\b")
 _REMOTE_SUFFIX = re.compile(r"\bremote\b\s*[-–—(,:]\s*([a-z][a-z ,.&]*?)\s*\)?\s*$")
 _PA = re.compile(r"\bpennsylvania\b|\bpa\b")
 _PA_EXCLUDED = (
@@ -49,6 +52,11 @@ _PA_EXCLUDED = (
 )
 _NATIONWIDE = re.compile(
     r"\b(?:united states|nationwide|any (?:us )?state|all (?:50 )?states)\b|\bu\.s\.|\bus\s+only\b"
+)
+# Full-text fallback: pronoun "us only" ("contact us only by email") is not
+# nationwide scope. Genuine "US only" clauses are captured as regions instead.
+_NATIONWIDE_TEXT = re.compile(
+    r"\b(?:united states|nationwide|any (?:us )?state|all (?:50 )?states)\b|\bu\.s\."
 )
 _US_STATE_NAMES = frozenset({
     "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
@@ -69,6 +77,27 @@ _US_STATE_ABBRS = frozenset({
     "nd", "oh", "ok", "or", "ri", "sc", "sd", "tn", "tx", "ut", "vt",
     "va", "wa", "wv", "wi", "wy", "dc",
 })
+# Abbreviations that collide with ordinary English words. An "only" phrase made
+# solely of these is ambiguous, never a verified geographic restriction.
+_COLLISION_ABBRS = frozenset({"in", "or", "me", "id", "oh", "ok", "hi"})
+_GEO_VOCAB = (
+    frozenset(w for name in _US_STATE_NAMES for w in name.split())
+    | _US_STATE_ABBRS
+    | {"us", "usa", "u.s.", "u.s", "nationwide", "united", "states", "america"}
+)
+_GEO_SAFE = _GEO_VOCAB - _COLLISION_ABBRS
+# Candidate-scope connector words allowed inside a geographic "only" phrase
+# ("Applicants from California only"); content words still must be geographic.
+_CANDIDATE_CONNECTORS = frozenset({
+    "applicants", "candidates", "workers", "employees", "from", "in", "to", "of",
+    "open", "available", "hiring", "based", "located", "the", "and",
+})
+_INCIDENTAL_SUBJECT = re.compile(
+    r"\b(?:customers?|clients?|users?|company|corporation|incorporated|headquartered|headquarters|offices?)\b"
+)
+_CANDIDATE_CONTEXT = re.compile(
+    r"\b(?:applicants?|candidates?|employees?|workers?|you|must|reside|residents?)\b"
+)
 
 
 def _has_technical(text: str) -> list[str]:
@@ -108,24 +137,43 @@ def _driving_reason(text: str) -> Reason:
 def _classify_region(region: str) -> str:
     if _PA.search(region):
         return "pa"
-    if region in {"us", "u.s.", "u.s", "usa"} or _NATIONWIDE.search(region):
-        return "nationwide"
     tokens = set(re.findall(r"[a-z.]+", region))
+    if (region in {"us", "u.s.", "u.s", "usa"} or tokens & {"us", "usa", "u.s.", "u.s"}
+            or _NATIONWIDE.search(region)):
+        return "nationwide"
     if tokens & _US_STATE_ABBRS or any(name in region for name in _US_STATE_NAMES):
         return "other"
     return "unclear"
+
+
+def _is_geo_only(region: str) -> bool:
+    tokens = re.findall(r"[a-z.]+", region)
+    allowed = _GEO_VOCAB | _CANDIDATE_CONNECTORS
+    return bool(tokens) and all(t in allowed for t in tokens) and any(t in _GEO_SAFE for t in tokens)
+
+
+def _incidental_subject(text: str, start: int) -> bool:
+    sentence_start = max(text.rfind(p, 0, start) for p in ".;!?\n") + 1
+    prefix = text[sentence_start:start]
+    return bool(_INCIDENTAL_SUBJECT.search(prefix)) and not _CANDIDATE_CONTEXT.search(prefix)
 
 
 def _remote_location_reason(loc: str, details: str, policy: Policy) -> Reason:
     if not policy.allow_remote:
         return Reason("location", "exclude", "remote not allowed by policy")
     text = f"{loc} {details}"
-    regions = [
-        m.group(1).strip()
-        for field_text in (loc, details)
-        for rx in (_RESTRICTION, _ONLY)
-        for m in rx.finditer(field_text)
-    ]
+    regions = []
+    for field_text in (loc, details):
+        for m in _RESTRICTION.finditer(field_text):
+            if _incidental_subject(field_text, m.start()):
+                continue
+            regions.append(m.group(1).strip())
+        for m in _RESIDENTS_ONLY.finditer(field_text):
+            regions.append(m.group(1).strip())
+        for m in _GEO_ONLY.finditer(field_text):
+            region = m.group(1).strip()
+            if _is_geo_only(region):
+                regions.append(region)
     suffix = _REMOTE_SUFFIX.search(loc)
     if suffix:
         regions.append(suffix.group(1).strip())
@@ -134,8 +182,7 @@ def _remote_location_reason(loc: str, details: str, policy: Policy) -> Reason:
     if any(rx.search(text) for rx in _PA_EXCLUDED):
         return Reason("location", "exclude", "remote explicitly excludes Pennsylvania (posting text)")
     pa_mentioned = bool(_PA.search(text))
-    other_mentioned = any(name in text for name in _US_STATE_NAMES)
-    if pa_mentioned and (other_mentioned or "other" in kinds):
+    if pa_mentioned and "other" in kinds:
         return Reason("location", "review",
                       "conflicting remote geographic evidence: Pennsylvania and other-state restriction; review")
     if kinds:
@@ -154,9 +201,7 @@ def _remote_location_reason(loc: str, details: str, policy: Policy) -> Reason:
         return Reason("location", "pass", "remote; nationwide US scope includes Pennsylvania")
     if pa_mentioned:
         return Reason("location", "pass", "remote explicitly open to Pennsylvania (posting text)")
-    if other_mentioned:
-        return Reason("location", "exclude", "remote limited to other state(s); Pennsylvania not included")
-    if _NATIONWIDE.search(text):
+    if _NATIONWIDE_TEXT.search(text):
         return Reason("location", "pass", "remote; nationwide US scope includes Pennsylvania")
     return Reason("location", "review", "remote geographic eligibility unstated; Needs Review (not inferred)")
 
@@ -196,6 +241,11 @@ def _pay_reason(posting: Posting, policy: Policy) -> Reason:
             return Reason("pay", "review",
                           f"open-ended low pay below floor (annualized low {low:.2f} < {policy.salary_floor_annual:.2f}); "
                           "Needs Review (Kyle decision 2026-11-15)")
+        high = annual_high(pay, hours_per_week=policy.hours_per_week, weeks_per_year=policy.weeks_per_year)
+        if pay.status == "bounded" and high is not None and high >= policy.salary_floor_annual:
+            return Reason("pay", "review",
+                          f"bounded pay range straddles floor (annualized low {low:.2f} < {policy.salary_floor_annual:.2f} "
+                          f"<= high {high:.2f}); Needs Review (Kyle decision 2026-11-15)")
         return Reason("pay", "exclude", f"pay below floor (annualized low {low:.2f} < {policy.salary_floor_annual:.2f}, unrounded)")
     if check is None:
         return Reason("pay", "info", f"pay {pay.status}: {pay.raw!r}; floor comparison unknown, remains visible")
