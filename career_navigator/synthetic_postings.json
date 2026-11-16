@@ -1,0 +1,157 @@
+{
+  "_note": "Synthetic-only seed data for the CN-004 read-only adapter. Generated from the demo fixtures (career_navigator/demo.py) and the golden examples (career_navigator/fixtures.py). NOT live data; never a JobFinder import. Live JobFinder integration is separately gated and needs Kyle's explicit approval.",
+  "postings": [
+    {
+      "url": "https://www.indeed.com/viewjob?jk=TECH1",
+      "title": "IT Support Technician",
+      "company": "Acme Tech",
+      "location": "Pittsburgh, PA",
+      "details": "Support Windows systems and networks.",
+      "pay_text": "$25 an hour"
+    },
+    {
+      "url": "https://www.indeed.com/viewjob?jk=REST1",
+      "title": "Restaurant General Manager",
+      "company": "Diner Corp",
+      "location": "Pittsburgh, PA",
+      "details": "",
+      "pay_text": "$55,000 a year"
+    },
+    {
+      "url": "https://www.indeed.com/viewjob?jk=POS1",
+      "title": "POS Support Technician",
+      "company": "Eat'n Park Restaurant Group",
+      "location": "Philadelphia, PA",
+      "details": "Support point-of-sale systems in restaurants.",
+      "pay_text": "$22 an hour"
+    },
+    {
+      "url": "https://www.indeed.com/viewjob?jk=DRV1",
+      "title": "Delivery Driver",
+      "company": "QuickShip",
+      "location": "Pittsburgh, PA",
+      "details": "CDL required.",
+      "pay_text": "$18 an hour"
+    },
+    {
+      "url": "https://www.indeed.com/viewjob?jk=MISS1",
+      "title": "Data Analyst",
+      "company": "Bridge Analytics",
+      "location": "",
+      "details": "Analyze data pipelines.",
+      "pay_text": ""
+    },
+    {
+      "url": "https://www.indeed.com/viewjob?jk=DUP1",
+      "title": "Cafe Manager",
+      "company": "Morning Brew",
+      "location": "Pittsburgh, PA",
+      "details": "",
+      "pay_text": "$45,000 a year"
+    },
+    {
+      "url": "https://www.indeed.com/viewjob?vjk=DUP1&jk=OTHER",
+      "title": "Caf\u00e9 Supervisor",
+      "company": "Morning Brew",
+      "location": "Pittsburgh, PA",
+      "details": "",
+      "pay_text": "$45,000 a year"
+    },
+    {
+      "url": "https://www.indeed.com/viewjob?jk=REM1",
+      "title": "Remote IT Analyst",
+      "company": "Commonwealth Systems",
+      "location": "Remote",
+      "details": "California residents only.",
+      "pay_text": "From $20 an hour"
+    },
+    {
+      "url": "https://www.indeed.com/viewjob?jk=REM2",
+      "title": "Remote Help Desk Analyst",
+      "company": "Keystone Support",
+      "location": "Remote",
+      "details": "Answer support tickets.",
+      "pay_text": "$21 an hour"
+    },
+    {
+      "url": "https://www.indeed.com/viewjob?jk=REM3",
+      "title": "Remote Systems Analyst",
+      "company": "Commonwealth Systems",
+      "location": "Remote - Pennsylvania",
+      "details": "Monitor systems.",
+      "pay_text": "$24 an hour"
+    },
+    {
+      "url": "https://indeed.com.evil.example/viewjob?jk=FAKE",
+      "title": "IT Help Desk",
+      "company": "Lookalike LLC",
+      "location": "Pittsburgh, PA",
+      "details": "",
+      "pay_text": "$20 an hour"
+    },
+    {
+      "url": "https://www.indeed.com/viewjob?jk=GOLD1",
+      "title": "IT Support Technician",
+      "company": "Acme Tech",
+      "location": "Pittsburgh, PA",
+      "details": "Support Windows systems and networks.",
+      "pay_text": "$25 an hour"
+    },
+    {
+      "url": "https://www.indeed.com/viewjob?jk=GOLD2",
+      "title": "Data Analyst",
+      "company": "Bridge Analytics",
+      "location": "Pittsburgh, PA",
+      "details": "Analyze data pipelines.",
+      "pay_text": ""
+    },
+    {
+      "url": "https://www.indeed.com/viewjob?jk=GOLD3",
+      "title": "Remote IT Analyst",
+      "company": "Commonwealth Systems",
+      "location": "Remote",
+      "details": "California residents only.",
+      "pay_text": "$20 an hour"
+    },
+    {
+      "url": "https://www.indeed.com/viewjob?jk=GOLD4",
+      "title": "Delivery Driver",
+      "company": "QuickShip",
+      "location": "Pittsburgh, PA",
+      "details": "CDL required.",
+      "pay_text": "$18 an hour"
+    },
+    {
+      "url": "https://www.indeed.com/viewjob?jk=GOLD5",
+      "title": "POS Support Technician",
+      "company": "Eat'n Park Restaurant Group",
+      "location": "Philadelphia, PA",
+      "details": "Support point-of-sale systems in restaurants.",
+      "pay_text": "$22 an hour"
+    },
+    {
+      "url": "https://www.indeed.com/viewjob?jk=GOLD6",
+      "title": "Remote Help Desk Analyst",
+      "company": "Keystone Support",
+      "location": "Remote",
+      "details": "Answer support tickets.",
+      "pay_text": "$21 an hour"
+    },
+    {
+      "url": "https://www.indeed.com/viewjob?jk=GOLD7",
+      "title": "IT Support Technician",
+      "company": "Acme Tech",
+      "location": "Pittsburgh, PA",
+      "details": "Support Windows systems and networks.",
+      "pay_text": "$18 to $25 an hour"
+    },
+    {
+      "url": "https://www.indeed.com/viewjob?jk=GOLD8",
+      "title": "Remote Support Analyst",
+      "company": "Keystone Support",
+      "location": "Remote",
+      "details": "Remote across the US.",
+      "pay_text": "$22 an hour"
+    }
+  ]
+}
