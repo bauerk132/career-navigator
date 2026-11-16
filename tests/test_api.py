@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from career_navigator.adapters import default_source_path, load_postings
-from career_navigator.app import create_app, job_id_for_url
+from career_navigator.app import create_app, job_id
 from career_navigator.pipeline import evaluate_postings
 from career_navigator.policy import Policy
 from career_navigator.ranking import rank_evaluations
@@ -77,7 +77,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(body["total"], 19)
         self.assertEqual(
             [job["id"] for job in body["shortlist"]],
-            [job_id_for_url(r.contract.to_dict()["source"]["url"]) for r in expected.shortlist],
+            [job_id(r.contract.to_dict()["source"]) for r in expected.shortlist],
         )
         scores = [job["fit_score"] for job in body["shortlist"]]
         self.assertEqual(scores, sorted(scores, reverse=True))
@@ -120,6 +120,43 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(body["totals"]["total"], 19)
         self.assertIsNotNone(body["refreshed_at"])
         self.assertEqual(source.read_bytes(), before)
+
+    def test_two_originals_sharing_one_canonical_get_distinct_ids(self):
+        # C-G2-01: two distinct postings whose originals canonicalize to the
+        # same URL must both be reachable via detail (old code hashed the
+        # canonical URL, so one was silently unreachable).
+        rows = [
+            {"url": "https://www.indeed.com/viewjob?jk=abc123&utm_source=x",
+             "title": "IT Support Technician", "company": "Acme Tech",
+             "location": "Pittsburgh, PA", "details": "Support Windows systems.",
+             "pay_text": "$25 an hour"},
+            {"url": "https://www.indeed.com/viewjob?jk=abc123",
+             "title": "Help Desk Analyst", "company": "Beta Support",
+             "location": "Pittsburgh, PA", "details": "Answer support tickets.",
+             "pay_text": "$22 an hour"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "collision.json"
+            source.write_text(json.dumps({"postings": rows}))
+            app = create_app(source_path=source)
+            with TestClient(app) as client:
+                body = client.get("/api/jobs").json()
+                self.assertEqual(body["total"], 2)
+                ids = [job["id"] for job in body["shortlist"]]
+                self.assertEqual(len(set(ids)), 2)
+                first = client.get(f"/api/jobs/{ids[0]}").json()
+                second = client.get(f"/api/jobs/{ids[1]}").json()
+            self.assertNotEqual(
+                first["contract"]["posting"]["title"],
+                second["contract"]["posting"]["title"],
+            )
+
+    def test_requirements_manifest_pins_backend_deps(self):
+        # C-G1-01: a fresh clone must reproduce the backend without guessing.
+        manifest = Path(__file__).parent.parent / "requirements.txt"
+        text = manifest.read_text()
+        for pinned in ("fastapi==0.163.1", "uvicorn==0.54.0", "httpx==0.28.1"):
+            self.assertIn(pinned, text)
 
     def test_cors_allows_localhost_dashboard_only(self):
         headers = {"Origin": "http://localhost:5173", "Access-Control-Request-Method": "GET"}

@@ -4,6 +4,37 @@
 - **Authority:** Kyle's "Approve" + adjustments A1–A3 (CN-001 contract v3 §0); Sol-reviewed combined plan Phase 1.
 - **Scope delivered:** isolated deterministic eligibility + explainable job-relevance core, **synthetic tests only**. **Stopped before live JobFinder integration.**
 
+## Slices A/B/C and fix rounds (2026-11-16)
+
+- **Slice A** (`career_navigator/contracts.py`, fixtures, schema, 32 tests) — commit
+  `9c434bf`, **accepted** (Qoder G1 PASS / G2 ACCEPT, GO). Five advisory nits
+  G2-N1..N5 (validate_result drift, mutable schema cache, status<->priority
+  invariant, unknowns duplicates/order, remote_pa normalization) — queued
+  as a follow-up, not yet fixed.
+- **A09** (remote across the US is eligible) — commit `9fc09b6`, **accepted**
+  (Qoder GO). Two advisory grammar edges G2-A09-N1/N2 — queued as a
+  follow-up.
+- **Slice B** (`career_navigator/ranking.py`, CN-005) — commit `08a50b8`,
+  **NO-GO** (G1 PASS conditional, G2 fix round required): 3 Major scoring
+  defects + 1 spec gap. Fix round in this commit: B-G2-01 negate-aware
+  requirement/perk detection; B-G2-02 years only in a candidate-requirement
+  framing; B-G2-03 distinct growth concepts, no requirement-context growth;
+  B-G1-01 fit weights Policy-configurable with validation. Also fixed a
+  cert-name boundary bug (`network+`/`security+` never matched, `\b` after
+  `+` cannot hold). 19 new regression tests; 52 ranking tests total.
+- **Slice C** (`career_navigator/app.py`, adapters, CN-004) — commit
+  `f728cd9`, **NO-GO** (G1 PASS conditional, G2 fix round required): 2
+  Majors + 4 nits. Fix round in this commit: C-G1-01 `requirements.txt`
+  with pinned fastapi 0.163.1 / uvicorn 0.54.0 / httpx 0.28.1; C-G2-01 job
+  ids from the original URL (two originals sharing one canonical no longer
+  collide); C-N1 `on_event` startup migrated to lifespan; C-N2 state swapped
+  as one atomic snapshot. C-N4 (dashboard must escape posting text) is for
+  the dashboard slice, not the backend. Evidence artifacts regenerated
+  (this file + `test-output.txt`).
+- **Verification after both fix rounds:** 303/303 tests, demo byte-identical,
+  corpus 40/40, controls 7/7, live uvicorn smoke 9 shortlist / 5 review /
+  5 excluded / 19 total, 19 unique job ids, no deprecation warnings.
+
 ## 1. Location and baseline
 
 - Work directory: `C:\Users\kbaue\Documents\Qoder\2026-11-14\2ba455d7\career-navigator\` (new, isolated; session workspace is not a git repo).

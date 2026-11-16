@@ -10,6 +10,7 @@ dashboard (Vite, default :5173) can call it.
 Run: uvicorn career_navigator.app:app --host 127.0.0.1 --port 8000
 """
 import hashlib
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException
@@ -29,16 +30,20 @@ _LOCAL_ORIGINS = (
 )
 
 
-def job_id_for_url(canonical_url: str) -> str:
+def job_id(source: dict) -> str:
     """Stable, deterministic id for a posting: first 12 hex chars of the
-    SHA-256 of its canonical URL."""
-    return hashlib.sha256(canonical_url.encode("utf-8")).hexdigest()[:12]
+    SHA-256 of its ORIGINAL URL (C-G2-01). Two distinct postings whose
+    originals canonicalize to the same URL must not share an id — hashing
+    the canonical URL collapsed them and made one unreachable via detail.
+    Falls back to the canonical URL when no original is recorded."""
+    url = source.get("original_url") or source["url"]
+    return hashlib.sha256(url.encode("utf-8")).hexdigest()[:12]
 
 
 def _ranked_result_to_dict(result: RankedResult) -> dict:
     contract = result.contract.to_dict()
     return {
-        "id": job_id_for_url(contract["source"]["url"]),
+        "id": job_id(contract["source"]),
         "contract": contract,
         "fit_score": result.fit_score,
         "fit_factors": [
@@ -58,7 +63,7 @@ def _ranked_result_to_dict(result: RankedResult) -> dict:
 
 
 def _totals(app: FastAPI) -> dict:
-    ranked = app.state.ranked
+    ranked = app.state.snapshot["ranked"]
     return {
         "shortlist": len(ranked.shortlist),
         "review": len(ranked.review),
@@ -71,22 +76,31 @@ def _reload(app: FastAPI) -> None:
     policy = app.state.policy
     postings = load_postings(app.state.source_path)
     ranked = rank_evaluations(evaluate_postings(postings, policy), policy)
-    app.state.ranked = ranked
-    app.state.index = {
-        job_id_for_url(result.contract.to_dict()["source"]["url"]): result
-        for group in (ranked.shortlist, ranked.review, ranked.excluded)
-        for result in group
+    # One snapshot object, swapped in a single assignment (C-N2): a
+    # concurrent refresh+read can never mix generations.
+    app.state.snapshot = {
+        "ranked": ranked,
+        "index": {
+            job_id(result.contract.to_dict()["source"]): result
+            for group in (ranked.shortlist, ranked.review, ranked.excluded)
+            for result in group
+        },
+        "refreshed_at": datetime.now(timezone.utc).isoformat(),
     }
-    app.state.refreshed_at = datetime.now(timezone.utc).isoformat()
 
 
 def _ensure_loaded(app: FastAPI) -> None:
-    if getattr(app.state, "ranked", None) is None:
+    if app.state.snapshot is None:
         _reload(app)
 
 
 def create_app(source_path=None, policy=None) -> FastAPI:
-    app = FastAPI(title="Career Navigator API", version="0.1.0")
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        _reload(app)
+        yield
+
+    app = FastAPI(title="Career Navigator API", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(_LOCAL_ORIGINS),
@@ -95,13 +109,7 @@ def create_app(source_path=None, policy=None) -> FastAPI:
     )
     app.state.policy = policy or Policy()
     app.state.source_path = source_path or default_source_path()
-    app.state.ranked = None
-    app.state.index = {}
-    app.state.refreshed_at = None
-
-    @app.on_event("startup")
-    def _startup() -> None:
-        _reload(app)
+    app.state.snapshot = None
 
     @app.get("/health")
     def health() -> dict:
@@ -110,35 +118,35 @@ def create_app(source_path=None, policy=None) -> FastAPI:
             "status": "ok",
             "source": "synthetic",
             "postings": _totals(app)["total"],
-            "refreshed_at": app.state.refreshed_at,
+            "refreshed_at": app.state.snapshot["refreshed_at"],
         }
 
     @app.get("/api/jobs")
     def jobs() -> dict:
         _ensure_loaded(app)
-        ranked = app.state.ranked
+        ranked = app.state.snapshot["ranked"]
         return {
             "shortlist": [_ranked_result_to_dict(r) for r in ranked.shortlist],
             "review": [_ranked_result_to_dict(r) for r in ranked.review],
             "excluded": [_ranked_result_to_dict(r) for r in ranked.excluded],
             "total": _totals(app)["total"],
-            "refreshed_at": app.state.refreshed_at,
+            "refreshed_at": app.state.snapshot["refreshed_at"],
         }
 
     @app.get("/api/jobs/shortlist")
     def shortlist() -> dict:
         _ensure_loaded(app)
-        ranked = app.state.ranked
+        ranked = app.state.snapshot["ranked"]
         return {
             "shortlist": [_ranked_result_to_dict(r) for r in ranked.shortlist],
             "total": len(ranked.shortlist),
-            "refreshed_at": app.state.refreshed_at,
+            "refreshed_at": app.state.snapshot["refreshed_at"],
         }
 
     @app.get("/api/jobs/{job_id}")
     def job_detail(job_id: str) -> dict:
         _ensure_loaded(app)
-        result = app.state.index.get(job_id)
+        result = app.state.snapshot["index"].get(job_id)
         if result is None:
             raise HTTPException(status_code=404, detail="job not found")
         return _ranked_result_to_dict(result)
@@ -160,13 +168,13 @@ def create_app(source_path=None, policy=None) -> FastAPI:
                 "fit_strong_threshold": policy.fit_strong_threshold,
                 "fit_realistic_threshold": policy.fit_realistic_threshold,
             },
-            "refreshed_at": app.state.refreshed_at,
+            "refreshed_at": app.state.snapshot["refreshed_at"],
         }
 
     @app.post("/api/refresh")
     def refresh() -> dict:
         _reload(app)
-        return {"refreshed_at": app.state.refreshed_at, "totals": _totals(app)}
+        return {"refreshed_at": app.state.snapshot["refreshed_at"], "totals": _totals(app)}
 
     return app
 
