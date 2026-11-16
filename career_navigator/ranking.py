@@ -40,11 +40,15 @@ FIT_WEIGHTS = DEFAULT_FIT_WEIGHTS
 
 # Growth concepts: each counts once (B-G2-03). "mentor" covers mentor/
 # mentorship/mentoring; "certification" covers certification/certifications.
-# training/certification in a requirement context ("certification required")
-# are NOT growth signals — they are requirements, not offered growth.
+# training/certification in a requirement context are NOT growth signals —
+# they are requirements, not offered growth. The guard is two-sided within
+# the sentence (B2-R1): a requirement anchor BEFORE the term ("Must have
+# CompTIA certification.") leaks into growth just as one after it
+# ("Certification required.") does, so the check lives in _concept_present,
+# not in the regexes.
 _GROWTH_CONCEPTS = (
-    ("training", re.compile(r"\btraining\b(?![^.;]{0,30}\b(?:required|must have|requires?)\b)")),
-    ("certification", re.compile(r"\bcertifications?\b(?![^.;]{0,30}\b(?:required|must have|requires?)\b)")),
+    ("training", re.compile(r"\btraining\b")),
+    ("certification", re.compile(r"\bcertifications?\b")),
     ("advancement", re.compile(r"\badvancement\b")),
     ("career growth", re.compile(r"\bcareer growth\b")),
     ("career path", re.compile(r"\bcareer path\b")),
@@ -55,6 +59,8 @@ _GROWTH_CONCEPTS = (
     ("growth opportunity", re.compile(r"\bgrowth opportunit\w*\b")),
     ("promotion", re.compile(r"\bpromot\w*\b")),
 )
+_GUARDED_GROWTH_CONCEPTS = frozenset({"training", "certification"})
+_REQUIREMENT_ANCHOR = re.compile(r"\b(?:required|must have|requires?|minimum|preferred)\b")
 # Years are extracted only when framed as a requirement for the candidate
 # (B-G2-02): a requirement anchor before the number, a "+" minimum marker,
 # or required/preferred right after. Employer-history boilerplate
@@ -78,8 +84,12 @@ _CERT_NEGATED = (
     re.compile(r"\bno\b[^.;]{0,20}\bcertification\b[^.;]{0,20}\brequired\b"),
     re.compile(r"\ba\+[^.;]{0,20}\bnot required\b"),
 )
-_NEGATED_FLEXIBLE = re.compile(r"\b(?:not|no) flexible\b")
-_NEGATED_HYBRID = re.compile(r"\b(?:not|no) hybrid\b")
+# Negated perks must not add the bonus or the evidence (B-G2-01). The guard
+# allows a short gap so "not very flexible" / "isn't flexible" / "never
+# hybrid" are caught too (B2-N1); the 12-char window keeps a negation from
+# reaching across a clause ("not flexible, but hybrid" stays hybrid).
+_NEGATED_FLEXIBLE = re.compile(r"\b(?:not|no|never|isn't|is not|aren't|are not)\b[^.;]{0,12}?\bflexible\b")
+_NEGATED_HYBRID = re.compile(r"\b(?:not|no|never|isn't|is not|aren't|are not)\b[^.;]{0,12}?\bhybrid\b")
 _DEGREE_REQUIRED = (
     re.compile(r"\bbachelor'?s?\b[^.;]{0,40}\b(?:required|must have|requires?|mandatory)\b"),
     re.compile(r"\b(?:required|must have)\b[^.;]{0,40}\bbachelor'?s?\b"),
@@ -141,9 +151,27 @@ def _skills_factor(evaluation: Evaluation, weights: dict) -> FitFactor:
     return _factor("skills", raw, evidence, weights)
 
 
+def _concept_present(text: str, name: str, pattern) -> bool:
+    """True when a growth concept appears as offered growth, not as a
+    requirement. Training/certification are guarded on BOTH sides of the
+    term within the sentence (B2-R1): a requirement anchor before the term
+    ("Must have CompTIA certification.") leaks into growth just as one
+    after it ("Certification required.") does."""
+    for match in pattern.finditer(text):
+        if name in _GUARDED_GROWTH_CONCEPTS:
+            before = re.split(r"[.;!?]", text[max(0, match.start() - 30):match.start()])[-1]
+            if _REQUIREMENT_ANCHOR.search(before):
+                continue
+            after = re.split(r"[.;!?]", text[match.end():match.end() + 30])[0]
+            if _REQUIREMENT_ANCHOR.search(after):
+                continue
+        return True
+    return False
+
+
 def _growth_factor(evaluation: Evaluation, weights: dict) -> FitFactor:
     text = f"{evaluation.posting.title} {evaluation.posting.details}".casefold()
-    hits = sorted({name for name, rx in _GROWTH_CONCEPTS if rx.search(text)})
+    hits = sorted({name for name, rx in _GROWTH_CONCEPTS if _concept_present(text, name, rx)})
     raw = min(1.0, len(hits) / 2.0)
     evidence = (
         f"growth signals: {', '.join(hits)}" if hits
@@ -159,6 +187,25 @@ def _required_years(text: str) -> int | None:
     return max(years) if years else None
 
 
+def _sentence_kinds(text: str, positive_patterns, negated_patterns):
+    """(has_positive, has_negated) per sentence. A sentence counts as
+    positive only if it matches a positive pattern and NO negated pattern
+    (B2-N2): the broad positive patterns also match negated sentences
+    ("No bachelor's degree required." matches "bachelor's ... required"),
+    so the negation must win within one sentence — but a positive
+    requirement in ANOTHER sentence (multi-track) is conservative and wins
+    overall. The [^.;] windows never cross a sentence boundary, so
+    splitting first changes nothing for single-sentence text."""
+    sentences = [s for s in re.split(r"[.;!?]", text) if s.strip()]
+    has_positive = has_negated = False
+    for sentence in sentences:
+        if any(rx.search(sentence) for rx in negated_patterns):
+            has_negated = True
+        elif any(rx.search(sentence) for rx in positive_patterns):
+            has_positive = True
+    return has_positive, has_negated
+
+
 def _requirements_factor(evaluation: Evaluation, weights: dict) -> FitFactor:
     text = f"{evaluation.posting.title} {evaluation.posting.details}".casefold()
     years = _required_years(text)
@@ -168,26 +215,28 @@ def _requirements_factor(evaluation: Evaluation, weights: dict) -> FitFactor:
     else:
         experience_raw = max(0.0, 1.0 - years / 6.0)
         experience_note = f"requires {years}+ years of experience"
-    if any(rx.search(text) for rx in _DEGREE_NEGATED):
+    degree_positive, degree_negated = _sentence_kinds(text, _DEGREE_REQUIRED, _DEGREE_NEGATED)
+    if degree_positive:
+        degree_raw = 0.5
+        degree_note = "bachelor's degree required"
+    elif degree_negated:
         degree_raw = 0.75 if _DEGREE_PREFERRED.search(text) else 1.0
         degree_note = "bachelor's degree not required" + (
             " (preferred)" if _DEGREE_PREFERRED.search(text) else ""
         )
-    elif any(rx.search(text) for rx in _DEGREE_REQUIRED):
-        degree_raw = 0.5
-        degree_note = "bachelor's degree required"
     elif _DEGREE_PREFERRED.search(text):
         degree_raw = 0.75
         degree_note = "bachelor's degree preferred"
     else:
         degree_raw = 1.0
         degree_note = "no degree requirement stated"
-    if any(rx.search(text) for rx in _CERT_NEGATED):
-        cert_raw = 1.0
-        cert_note = "no certification requirement stated"
-    elif any(rx.search(text) for rx in _CERT_REQUIRED):
+    cert_positive, cert_negated = _sentence_kinds(text, _CERT_REQUIRED, _CERT_NEGATED)
+    if cert_positive:
         cert_raw = 0.7
         cert_note = "certification required"
+    elif cert_negated:
+        cert_raw = 1.0
+        cert_note = "no certification requirement stated"
     else:
         cert_raw = 1.0
         cert_note = "no certification requirement stated"

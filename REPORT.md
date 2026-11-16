@@ -34,6 +34,28 @@
 - **Verification after both fix rounds:** 303/303 tests, demo byte-identical,
   corpus 40/40, controls 7/7, live uvicorn smoke 9 shortlist / 5 review /
   5 excluded / 19 total, 19 unique job ids, no deprecation warnings.
+- **Fix Round B2** — Qoder re-review of Fix Round B (`cc068d9`) was NO-GO:
+  1 residual Major B2-R1 (growth-phrase anchor-before leak — the
+  requirement guard only looked after the term, so "Must have CompTIA
+  certification." scored career_growth 0.50 and flipped the class to
+  Strong Fit at 79.00; correct is 64.00 Realistic) + 3 nits. Fix round:
+  B2-R1 two-sided requirement guard for training/certification
+  (`_concept_present`, sentence-bounded lookbehind + lookahead); B2-N1
+  perk-negation guard allows a short gap ("isn't flexible", "not very
+  flexible", "never hybrid"); B2-N2 contradictory multi-track text is
+  sentence-aware — a negation wins within its own sentence, an explicit
+  positive requirement in another sentence wins overall (conservative);
+  B2-N3 trailing newline in `policy.py`; C-N4 (from the Fix Round C
+  re-review, GO for C's scope) endpoints bind `snapshot =
+  app.state.snapshot` once per request so a mid-request refresh cannot mix
+  generations. 12 new regression tests (64 ranking tests total).
+- **Verification after Fix Round B2:** 315/315 tests, demo byte-identical,
+  corpus 40/40, controls 7/7, live uvicorn smoke 9 shortlist / 5 review /
+  5 excluded / 19 total, 19 unique job ids, no deprecation warnings.
+  Antigravity re-reviewed both Fix Round B (`cc068d9`) and Fix Round C
+  (`7cefeccb`) as GO for API/dashboard fit (hof_01M7J3XN8N4FVZDSN0); Qoder
+  re-reviewed Fix Round C (`7cefeccb`) as GO for its own scope, gated on
+  the B fix round (hof_01M7J4EDZBNHP82HGA).
 
 ## 1. Location and baseline
 

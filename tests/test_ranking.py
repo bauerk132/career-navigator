@@ -285,9 +285,46 @@ class FixRoundBTests(unittest.TestCase):
         self.assertEqual(commute.raw, 0.5)
         self.assertNotIn("flexible", commute.evidence)
 
+    # B2-N1: the perk-negation guard allows a short gap, so "isn't flexible",
+    # "not very flexible", and "never hybrid" are caught too.
+    def test_isnt_flexible_adds_no_perk(self):
+        p = posting(location="Remote", details="Isn't flexible hours. Answer support tickets.")
+        commute = factor(ranked(p), "commute_schedule")
+        self.assertEqual(commute.raw, 0.5)
+        self.assertNotIn("flexible", commute.evidence)
+
+    def test_not_very_flexible_adds_no_perk(self):
+        p = posting(location="Remote", details="Not very flexible. Answer support tickets.")
+        commute = factor(ranked(p), "commute_schedule")
+        self.assertEqual(commute.raw, 0.5)
+        self.assertNotIn("flexible", commute.evidence)
+
+    def test_never_hybrid_adds_no_perk(self):
+        p = posting(location="Remote", details="Never hybrid. Answer support tickets.")
+        commute = factor(ranked(p), "commute_schedule")
+        self.assertEqual(commute.raw, 0.5)
+        self.assertNotIn("hybrid", commute.evidence)
+
+    def test_flexible_hours_still_adds_the_perk(self):
+        # Remote base is 0.5; the flexible perk adds 0.1.
+        p = posting(location="Remote", details="Flexible hours. Answer support tickets.")
+        commute = factor(ranked(p), "commute_schedule")
+        self.assertEqual(commute.raw, 0.6)
+        self.assertIn("flexible", commute.evidence)
+
     def test_degree_required_still_scores(self):
         p = posting(details="Bachelor's degree required.")
         self.assertEqual(factor(ranked(p), "hiring_requirements").raw, 0.5)
+
+    # B2-N2: contradictory multi-track text — the explicit positive
+    # requirement wins (conservative), not the negated one.
+    def test_degree_required_for_senior_track_beats_not_required_for_entry(self):
+        p = posting(details="No degree required for entry. Bachelor's degree required for senior track.")
+        self.assertEqual(factor(ranked(p), "hiring_requirements").raw, 0.5)
+
+    def test_cert_required_for_senior_track_beats_not_required_for_entry(self):
+        p = posting(details="No certification required for entry. CompTIA A+ required for senior track.")
+        self.assertEqual(factor(ranked(p), "hiring_requirements").raw, 0.7)
 
     # B-G2-02: years count only in a candidate-requirement framing.
     def test_employer_history_years_not_extracted(self):
@@ -323,6 +360,38 @@ class FixRoundBTests(unittest.TestCase):
     def test_training_required_is_not_growth(self):
         p = posting(details="Training required for this role.")
         self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+
+    # B2-R1: the growth guard is two-sided within the sentence — a
+    # requirement anchor BEFORE the term ("Must have CompTIA
+    # certification.") leaks into growth just as one after it does, and the
+    # false credit flips the class (79 Strong Fit -> 64 Realistic on the
+    # reviewer's probe).
+    def test_must_have_certification_is_not_growth(self):
+        p = posting(details="Must have CompTIA certification.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(factor(ranked(p), "hiring_requirements").raw, 0.7)
+        self.assertEqual(ranked(p).final_classification, "Realistic")
+
+    def test_required_security_plus_certification_is_not_growth(self):
+        p = posting(details="Required: Security+ certification.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(factor(ranked(p), "hiring_requirements").raw, 0.7)
+
+    def test_we_require_certification_is_not_growth(self):
+        p = posting(details="We require certification.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+
+    def test_training_provided_is_growth(self):
+        p = posting(details="Training provided.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+
+    def test_certification_support_is_growth(self):
+        p = posting(details="Certification support.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+
+    def test_growth_in_next_sentence_still_counts(self):
+        p = posting(details="Must have CompTIA certification. Training provided.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
 
     # B-G1-01: fit weights are Policy-configurable with validation.
     def test_default_policy_weights_are_the_blueprint(self):

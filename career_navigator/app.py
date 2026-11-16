@@ -62,8 +62,10 @@ def _ranked_result_to_dict(result: RankedResult) -> dict:
     }
 
 
-def _totals(app: FastAPI) -> dict:
-    ranked = app.state.snapshot["ranked"]
+def _totals(snapshot: dict) -> dict:
+    # Takes the snapshot bound once by the endpoint (C-N4) so a /api/refresh
+    # interleaving mid-request can never mix generations inside one response.
+    ranked = snapshot["ranked"]
     return {
         "shortlist": len(ranked.shortlist),
         "review": len(ranked.review),
@@ -114,39 +116,43 @@ def create_app(source_path=None, policy=None) -> FastAPI:
     @app.get("/health")
     def health() -> dict:
         _ensure_loaded(app)
+        snapshot = app.state.snapshot
         return {
             "status": "ok",
             "source": "synthetic",
-            "postings": _totals(app)["total"],
-            "refreshed_at": app.state.snapshot["refreshed_at"],
+            "postings": _totals(snapshot)["total"],
+            "refreshed_at": snapshot["refreshed_at"],
         }
 
     @app.get("/api/jobs")
     def jobs() -> dict:
         _ensure_loaded(app)
-        ranked = app.state.snapshot["ranked"]
+        snapshot = app.state.snapshot
+        ranked = snapshot["ranked"]
         return {
             "shortlist": [_ranked_result_to_dict(r) for r in ranked.shortlist],
             "review": [_ranked_result_to_dict(r) for r in ranked.review],
             "excluded": [_ranked_result_to_dict(r) for r in ranked.excluded],
-            "total": _totals(app)["total"],
-            "refreshed_at": app.state.snapshot["refreshed_at"],
+            "total": _totals(snapshot)["total"],
+            "refreshed_at": snapshot["refreshed_at"],
         }
 
     @app.get("/api/jobs/shortlist")
     def shortlist() -> dict:
         _ensure_loaded(app)
-        ranked = app.state.snapshot["ranked"]
+        snapshot = app.state.snapshot
+        ranked = snapshot["ranked"]
         return {
             "shortlist": [_ranked_result_to_dict(r) for r in ranked.shortlist],
             "total": len(ranked.shortlist),
-            "refreshed_at": app.state.snapshot["refreshed_at"],
+            "refreshed_at": snapshot["refreshed_at"],
         }
 
     @app.get("/api/jobs/{job_id}")
     def job_detail(job_id: str) -> dict:
         _ensure_loaded(app)
-        result = app.state.snapshot["index"].get(job_id)
+        snapshot = app.state.snapshot
+        result = snapshot["index"].get(job_id)
         if result is None:
             raise HTTPException(status_code=404, detail="job not found")
         return _ranked_result_to_dict(result)
@@ -154,9 +160,10 @@ def create_app(source_path=None, policy=None) -> FastAPI:
     @app.get("/api/stats")
     def stats() -> dict:
         _ensure_loaded(app)
+        snapshot = app.state.snapshot
         policy = app.state.policy
         return {
-            "totals": _totals(app),
+            "totals": _totals(snapshot),
             "policy": {
                 "salary_floor_hourly": SALARY_FLOOR_HOURLY,
                 "salary_floor_annual": policy.salary_floor_annual,
@@ -168,13 +175,14 @@ def create_app(source_path=None, policy=None) -> FastAPI:
                 "fit_strong_threshold": policy.fit_strong_threshold,
                 "fit_realistic_threshold": policy.fit_realistic_threshold,
             },
-            "refreshed_at": app.state.snapshot["refreshed_at"],
+            "refreshed_at": snapshot["refreshed_at"],
         }
 
     @app.post("/api/refresh")
     def refresh() -> dict:
         _reload(app)
-        return {"refreshed_at": app.state.snapshot["refreshed_at"], "totals": _totals(app)}
+        snapshot = app.state.snapshot
+        return {"refreshed_at": snapshot["refreshed_at"], "totals": _totals(snapshot)}
 
     return app
 
