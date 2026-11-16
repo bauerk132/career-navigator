@@ -446,6 +446,61 @@ class FixRoundBTests(unittest.TestCase):
         p = posting(details="We offer paid training, minimum 40 hours per week.")
         self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
 
+    # Fix Round B4 — S1/S2/S3/S4/S5 regression matrix. The B3 comma rules
+    # traded one leak for another; these five probes pin the interactions
+    # (sentence-level positive matching, offer-aware before-guard,
+    # predicate/minimum-split after-guard) so the next round can't.
+    # S1: comma-appositive degree requirement (B4-R1).
+    def test_degree_comma_required_is_a_requirement(self):
+        p = posting(title="Network Support Technician",
+                    details="Bachelor's degree, required for all candidates.")
+        self.assertEqual(factor(ranked(p), "hiring_requirements").raw, 0.5)
+        self.assertEqual(ranked(p).fit_score, 60.00)
+        self.assertEqual(ranked(p).final_classification, "Realistic")
+
+    # S2: comma-appositive cert requirement (B4-R1).
+    def test_cert_comma_required_is_a_requirement_not_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="CompTIA Security+ certification, required within 6 months.")
+        self.assertEqual(factor(ranked(p), "hiring_requirements").raw, 0.7)
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(ranked(p).fit_score, 64.00)
+        self.assertEqual(ranked(p).final_classification, "Realistic")
+
+    # S3: a comma after the term must not shield a requirement predicate
+    # in the next clause (B4-R1 growth half).
+    def test_training_comma_required_is_not_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Training, required for all new hires, is provided.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(ranked(p).fit_score, 70.00)
+
+    # S4: an anchor in an earlier clause must not suppress a term a later
+    # clause explicitly offers (B4-R2).
+    def test_require_experience_and_offer_certification_is_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="We require 3 years of experience and offer certification.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+        self.assertEqual(ranked(p).fit_score, 75.00)
+
+    # S5: same offer-aware rule for training (B4-R2).
+    def test_must_have_experience_and_offer_training_is_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Must have 2 years of experience and we offer paid training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+        self.assertEqual(ranked(p).fit_score, 85.00)
+
+    # Lock-ins: offered growth in one sentence still counts when another
+    # sentence states a requirement; a "minimum" about pay in an earlier
+    # clause must not suppress offered training.
+    def test_offered_certification_counts_when_next_sentence_requires(self):
+        p = posting(details="We offer certification. Certification required.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+
+    def test_minimum_pay_in_earlier_clause_does_not_suppress_training(self):
+        p = posting(details="Minimum starting pay $25/hour, training provided.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+
     # B-G1-01: fit weights are Policy-configurable with validation.
     def test_default_policy_weights_are_the_blueprint(self):
         self.assertEqual(Policy().fit_weights, FIT_WEIGHTS)

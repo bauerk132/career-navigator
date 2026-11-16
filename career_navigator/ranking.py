@@ -60,12 +60,21 @@ _GROWTH_CONCEPTS = (
     ("promotion", re.compile(r"\bpromot\w*\b")),
 )
 _GUARDED_GROWTH_CONCEPTS = frozenset({"training", "certification"})
-# "mandatory" is a requirement word (B3-N1: "Mandatory certification." /
-# "Certification is mandatory." are requirements, not offered growth).
-# "need/needs/necessary/essential" are deliberately NOT anchors: they also
-# describe offered growth ("the training you need to succeed"), so adding
-# them would suppress genuine growth signals.
-_REQUIREMENT_ANCHOR = re.compile(r"\b(?:required|must have|requires?|minimum|preferred|mandatory)\b")
+# Requirement anchors, split by how far they may reach (B4). Predicate
+# anchors (required/must have/requires/mandatory/preferred) are requirement
+# predicates: they may reach across commas within a sentence (B3-R1 cert
+# lists; B4-R1 "Training, required for all new hires"). "minimum" is
+# usually about pay/hours, not the growth term: it only counts within the
+# term's own clause (B3-N2). "need/needs/necessary/essential" are
+# deliberately NOT anchors: they also describe offered growth ("the
+# training you need to succeed").
+_REQUIREMENT_PREDICATE = re.compile(r"\b(?:required|must have|requires?|mandatory|preferred)\b")
+_REQUIREMENT_MINIMUM = re.compile(r"\bminimum\b")
+# Offer verbs (B4-R2): an anchor in an earlier clause must not suppress a
+# term a later clause explicitly offers ("We require 3 years of experience
+# and offer certification."). "give" is deliberately NOT an offer verb —
+# it also appears in requirements ("You must give certification details.").
+_OFFER_VERB = re.compile(r"\b(?:offer|offers|offered|offering|provide|provides|provided|providing|include|includes|included|including)\b")
 # Years are extracted only when framed as a requirement for the candidate
 # (B-G2-02): a requirement anchor before the number, a "+" minimum marker,
 # or required/preferred right after. Employer-history boilerplate
@@ -160,22 +169,29 @@ def _skills_factor(evaluation: Evaluation, weights: dict) -> FitFactor:
 def _concept_present(text: str, name: str, pattern) -> bool:
     """True when a growth concept appears as offered growth, not as a
     requirement. Training/certification are guarded on BOTH sides of the
-    term within the sentence (B2-R1): a requirement anchor before the term
-    ("Must have CompTIA certification.") leaks into growth just as one
-    after it ("Certification required.") does. The before-search covers
-    the FULL preceding sentence fragment (B3-R1): a 30-char window cuts
-    off anchors before a cert list ("Must have CompTIA A+, Network+, or
-    Security+ certification."). The after-search keeps its 30-char window
-    and is clause-aware (B3-N2): a "minimum" about pay/hours in a later
-    clause ("We provide training, minimum starting pay $25/hour.") must
-    not suppress genuinely offered training."""
+    term within the sentence (B2-R1). The before-search covers the FULL
+    preceding sentence fragment (B3-R1: a 30-char window cuts off anchors
+    before a cert list), but it is offer-aware (B4-R2): the search stops
+    after an offer/provide/include verb, so an anchor in an earlier clause
+    cannot suppress a term a later clause explicitly offers. The
+    after-search is 30 chars, sentence-bounded: predicate anchors may
+    reach across commas (B4-R1: "Training, required for all new hires"),
+    while "minimum" only counts within the term's own clause (B3-N2:
+    "minimum starting pay" must not suppress offered training)."""
     for match in pattern.finditer(text):
         if name in _GUARDED_GROWTH_CONCEPTS:
             before = re.split(r"[.;!?]", text[:match.start()])[-1]
-            if _REQUIREMENT_ANCHOR.search(before):
+            offer_matches = list(_OFFER_VERB.finditer(before))
+            if offer_matches:
+                before = before[offer_matches[-1].end():]
+            if _REQUIREMENT_PREDICATE.search(before):
                 continue
-            after = re.split(r"[.;!?,]", text[match.end():match.end() + 30])[0]
-            if _REQUIREMENT_ANCHOR.search(after):
+            if _REQUIREMENT_MINIMUM.search(before.rsplit(",", 1)[-1]):
+                continue
+            after = re.split(r"[.;!?]", text[match.end():match.end() + 30])[0]
+            if _REQUIREMENT_PREDICATE.search(after):
+                continue
+            if _REQUIREMENT_MINIMUM.search(after.split(",", 1)[0]):
                 continue
         return True
     return False
@@ -200,24 +216,33 @@ def _required_years(text: str) -> int | None:
 
 
 def _sentence_kinds(text: str, positive_patterns, negated_patterns):
-    """(has_positive, has_negated) per sentence. A sentence counts as
-    positive only if it matches a positive pattern and NO negated pattern
-    (B2-N2): the broad positive patterns also match negated sentences
-    ("No bachelor's degree required." matches "bachelor's ... required"),
-    so the negation must win within one sentence — but a positive
-    requirement in ANOTHER sentence (multi-track) is conservative and wins
-    overall. The [^.;] windows never cross a sentence boundary, so
-    splitting first changes nothing for single-sentence text. Clauses
-    count separately (B3-N4): in comma-joined contradictory text
-    ("Security+ certification required, no certification required for
-    interns.") the explicit positive requirement wins."""
-    sentences = [s for s in re.split(r"[.;!?,]", text) if s.strip()]
+    """(has_positive, has_negated). Positive patterns are matched at the
+    SENTENCE level ([.;!?]) so their comma-spanning windows work (B4-R1:
+    "Bachelor's degree, required for all candidates." — splitting on
+    commas first destroys the match). Clause analysis ([.;!?,]) only
+    decides the contradiction case: an explicit positive clause beats a
+    negated clause (B3-N4: "Security+ certification required, no
+    certification required for interns."), and a sentence whose positive
+    match sits entirely inside a negated clause counts as negated (B2-N2:
+    "No bachelor's degree required.")."""
     has_positive = has_negated = False
-    for sentence in sentences:
-        if any(rx.search(sentence) for rx in negated_patterns):
-            has_negated = True
-        elif any(rx.search(sentence) for rx in positive_patterns):
+    for sentence in re.split(r"[.;!?]", text):
+        if not sentence.strip():
+            continue
+        sentence_positive = any(rx.search(sentence) for rx in positive_patterns)
+        sentence_negated = any(rx.search(sentence) for rx in negated_patterns)
+        clause_positive = clause_negated = False
+        for clause in re.split(r",", sentence):
+            if not clause.strip():
+                continue
+            if any(rx.search(clause) for rx in negated_patterns):
+                clause_negated = True
+            elif any(rx.search(clause) for rx in positive_patterns):
+                clause_positive = True
+        if clause_positive or (sentence_positive and not clause_negated):
             has_positive = True
+        elif clause_negated or sentence_negated:
+            has_negated = True
     return has_positive, has_negated
 
 

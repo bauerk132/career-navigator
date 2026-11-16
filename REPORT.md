@@ -76,6 +76,44 @@
   5 excluded / 19 total, 19 unique job ids, no deprecation warnings.
   Antigravity re-reviewed Fix Round B2 (`6a2f637`) as GO for API/dashboard
   fit (hof_01M7J59H49W98NRJVH).
+- **Fix Round B4** — Qoder re-review of Fix Round B3 (`5e460fb`) was NO-GO:
+  all 5 claimed fixes verified, but the commit introduced 2 NEW Major
+  regressions vs parent (hof_01M7J75R4KAP1094E8). B4-R1: comma-splitting
+  broke requirement detection — the B3-N4 clause split destroyed the
+  positive patterns' own comma-spanning windows, so "Bachelor's degree,
+  required for all candidates." scored no requirement (fit 70.00 Strong
+  Fit; correct 60.00 Realistic) and "CompTIA Security+ certification,
+  required within 6 months." scored req 1.00 AND growth 0.50 (fit 85.00;
+  correct 64.00 Realistic). B4-R2: the full-sentence before-guard
+  suppressed explicitly offered growth — "We require 3 years of
+  experience and offer certification." scored growth 0.00 (fit 60.00
+  Realistic; correct 75.00 Strong Fit). Fix round: B4-R1 positive
+  patterns are matched at SENTENCE level ([.;!?]) so comma-spanning
+  windows work; clause analysis is used ONLY for the contradiction case
+  (an explicit positive clause beats a negated clause, B3-N4 kept green);
+  the growth after-guard splits anchors — predicates (required/must
+  have/requires/mandatory/preferred) may reach across commas
+  ("Training, required for all new hires, is provided." is not growth)
+  while "minimum" only counts within the term's own clause (B3-N2 kept
+  green). B4-R2 the before-guard is offer-aware: the search stops after
+  an offer/provide/include verb, so an anchor in an earlier clause
+  cannot suppress a term a later clause explicitly offers ("give" is
+  deliberately NOT an offer verb — it also appears in requirements).
+  The anchor set is now `_REQUIREMENT_PREDICATE` + `_REQUIREMENT_MINIMUM`
+  (replacing `_REQUIREMENT_ANCHOR`). 7 new regression tests (79 ranking
+  tests total): S1–S5 regression matrix plus two lock-ins (offered
+  certification counts when the next sentence states a requirement;
+  "minimum" about pay in an earlier clause does not suppress offered
+  training). The reviewer's shared-helper suggestion was considered and
+  not taken: the boundary rules differ per site (sentence-level positive
+  matching vs offer-aware before-guard vs predicate/minimum-split
+  after-guard), so they stay as focused helpers guarded by the S1–S5
+  matrix. Antigravity re-reviewed Fix Round B3 (`5e460fb`) as GO for
+  API/dashboard fit (hof_01M7J6YEYQD8MCJ5TB).
+- **Verification after Fix Round B4:** 330/330 tests, demo byte-identical,
+  corpus 40/40, controls 7/7, live uvicorn smoke 9 shortlist / 5 review /
+  5 excluded / 19 total, 19 unique job ids, detail parity 19/19, no
+  deprecation warnings.
 
 ## 1. Location and baseline
 
