@@ -251,5 +251,105 @@ class RankedResultsTests(unittest.TestCase):
             self.assertIsNone(result.shortlist_rank)
 
 
+class FixRoundBTests(unittest.TestCase):
+    # B-G2-01: negated requirements must not score as requirements.
+    def test_no_degree_required_does_not_score_as_requirement(self):
+        p = posting(details="No bachelor's degree required.")
+        self.assertEqual(factor(ranked(p), "hiring_requirements").raw, 1.0)
+
+    def test_degree_not_required_does_not_score_as_requirement(self):
+        p = posting(details="Bachelor's degree not required.")
+        self.assertEqual(factor(ranked(p), "hiring_requirements").raw, 1.0)
+
+    def test_no_cert_required_does_not_score_as_requirement(self):
+        p = posting(details="No CompTIA A+ required.")
+        self.assertEqual(factor(ranked(p), "hiring_requirements").raw, 1.0)
+
+    def test_cert_not_required_does_not_score_as_requirement(self):
+        p = posting(details="CompTIA A+ not required.")
+        self.assertEqual(factor(ranked(p), "hiring_requirements").raw, 1.0)
+
+    def test_network_plus_required_scores(self):
+        # Cert-name boundary fix: "network+" must match (the old \b after
+        # "+" never matched, so Network+/Security+ requirements were missed).
+        p = posting(details="Network+ certification required.")
+        self.assertEqual(factor(ranked(p), "hiring_requirements").raw, 0.7)
+
+    def test_security_plus_not_required_does_not_score(self):
+        p = posting(details="Security+ not required.")
+        self.assertEqual(factor(ranked(p), "hiring_requirements").raw, 1.0)
+
+    def test_not_flexible_adds_no_perk(self):
+        p = posting(location="Remote", details="Not flexible hours. Answer support tickets.")
+        commute = factor(ranked(p), "commute_schedule")
+        self.assertEqual(commute.raw, 0.5)
+        self.assertNotIn("flexible", commute.evidence)
+
+    def test_degree_required_still_scores(self):
+        p = posting(details="Bachelor's degree required.")
+        self.assertEqual(factor(ranked(p), "hiring_requirements").raw, 0.5)
+
+    # B-G2-02: years count only in a candidate-requirement framing.
+    def test_employer_history_years_not_extracted(self):
+        p = posting(details="Our company has 10 years of experience in the industry. Support Windows systems.")
+        self.assertEqual(factor(ranked(p), "hiring_requirements").raw, 1.0)
+
+    def test_minimum_years_extracted(self):
+        p = posting(details="Minimum 3 years experience.")
+        self.assertAlmostEqual(factor(ranked(p), "hiring_requirements").raw, 0.5)
+
+    def test_bare_years_without_framing_not_extracted(self):
+        p = posting(details="3 years of experience with Windows systems.")
+        self.assertEqual(factor(ranked(p), "hiring_requirements").raw, 1.0)
+
+    def test_plus_years_extracted(self):
+        p = posting(details="3+ years of experience.")
+        self.assertAlmostEqual(factor(ranked(p), "hiring_requirements").raw, 0.5)
+
+    # B-G2-03: growth signals count once per distinct concept; requirement
+    # context is not growth.
+    def test_mentorship_counts_once(self):
+        p = posting(details="Mentorship available.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+
+    def test_certification_variants_count_once(self):
+        p = posting(details="Certification and certifications offered.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+
+    def test_certification_required_is_not_growth(self):
+        p = posting(details="Certification required for this role.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+
+    def test_training_required_is_not_growth(self):
+        p = posting(details="Training required for this role.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+
+    # B-G1-01: fit weights are Policy-configurable with validation.
+    def test_default_policy_weights_are_the_blueprint(self):
+        self.assertEqual(Policy().fit_weights, FIT_WEIGHTS)
+
+    def test_custom_weights_change_the_score(self):
+        cafe = posting(title="Cafe Manager", company="Morning Brew",
+                       location="Pittsburgh, PA", details="", pay_text="$45,000 a year")
+        custom = Policy(fit_weights={
+            "skills": 0.0, "career_growth": 0.0, "hiring_requirements": 1.0,
+            "commute_schedule": 0.0, "comp": 0.0,
+        })
+        self.assertEqual(ranked(cafe, custom).fit_score, 100.0)
+
+    def test_invalid_weights_raise(self):
+        for bad in (
+            {"skills": 0.3, "career_growth": 0.3, "hiring_requirements": 0.2,
+             "commute_schedule": 0.1},  # missing comp
+            {"skills": 0.5, "career_growth": 0.3, "hiring_requirements": 0.2,
+             "commute_schedule": 0.1, "comp": 0.1},  # sums to 1.2
+            {"skills": -0.1, "career_growth": 0.3, "hiring_requirements": 0.2,
+             "commute_schedule": 0.1, "comp": 0.5},  # negative value
+        ):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    Policy(fit_weights=bad)
+
+
 if __name__ == "__main__":
     unittest.main()

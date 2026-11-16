@@ -15,7 +15,14 @@ Rules:
   fit >= strong threshold -> Strong Fit, >= realistic threshold -> Realistic,
   below realistic -> Stretch (eligible but a reach on the blueprint factors).
 - Thresholds are Muse defaults (70 / 45), tunable in Policy; they are not a
-  Kyle decision. The weights are the blueprint's.
+  Kyle decision. The weights are the blueprint's, configurable per Policy
+  with validation (B-G1-01).
+- Negated requirements do not score as requirements ("no bachelor's degree
+  required" is the absence of one; "not flexible" adds no perk bonus,
+  B-G2-01). Years count only when framed as a candidate requirement
+  (requires/required/minimum/N+ years, B-G2-02). Growth signals count once
+  per distinct concept, and requirement-context words ("certification
+  required") are not growth signals (B-G2-03).
 - A gap is listed for every fit factor below 0.5, in plain language, with
   what is missing — never a claim about the candidate.
 - stdlib only. No I/O, no persistence.
@@ -26,27 +33,53 @@ from dataclasses import dataclass
 from .contracts import ResultContract, build_contract
 from .eligibility import _TECHNICAL
 from .pipeline import Evaluation
-from .policy import Policy
+from .policy import DEFAULT_FIT_WEIGHTS, Policy
 
-FIT_WEIGHTS = {
-    "skills": 0.30,
-    "career_growth": 0.30,
-    "hiring_requirements": 0.20,
-    "commute_schedule": 0.10,
-    "comp": 0.10,
-}
+# Blueprint fit weights (the default; a Policy may override them, B-G1-01).
+FIT_WEIGHTS = DEFAULT_FIT_WEIGHTS
 
-_GROWTH_TERMS = (
-    "training", "certification", "certifications", "advancement",
-    "career growth", "career path", "professional development",
-    "mentorship", "mentor", "entry-level", "entry level", "junior",
-    "growth opportunity", "promot",
+# Growth concepts: each counts once (B-G2-03). "mentor" covers mentor/
+# mentorship/mentoring; "certification" covers certification/certifications.
+# training/certification in a requirement context ("certification required")
+# are NOT growth signals — they are requirements, not offered growth.
+_GROWTH_CONCEPTS = (
+    ("training", re.compile(r"\btraining\b(?![^.;]{0,30}\b(?:required|must have|requires?)\b)")),
+    ("certification", re.compile(r"\bcertifications?\b(?![^.;]{0,30}\b(?:required|must have|requires?)\b)")),
+    ("advancement", re.compile(r"\badvancement\b")),
+    ("career growth", re.compile(r"\bcareer growth\b")),
+    ("career path", re.compile(r"\bcareer path\b")),
+    ("professional development", re.compile(r"\bprofessional development\b")),
+    ("mentor", re.compile(r"\bmentor\w*\b")),
+    ("entry-level", re.compile(r"\bentry[- ]level\b")),
+    ("junior", re.compile(r"\bjunior\b")),
+    ("growth opportunity", re.compile(r"\bgrowth opportunit\w*\b")),
+    ("promotion", re.compile(r"\bpromot\w*\b")),
 )
+# Years are extracted only when framed as a requirement for the candidate
+# (B-G2-02): a requirement anchor before the number, a "+" minimum marker,
+# or required/preferred right after. Employer-history boilerplate
+# ("10 years of experience in the industry") has none of these and is not
+# extracted.
 _YEARS_OF_EXPERIENCE = (
-    re.compile(r"(\d+)\s*\+?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:experience|exp)\b"),
-    re.compile(r"(?:experience|exp)\b[^.;]{0,30}?(\d+)\s*\+?\s*(?:years?|yrs?)\b"),
-    re.compile(r"(?:minimum|min\.?|at least)\s+(\d+)\s*\+?\s*(?:years?|yrs?)\b"),
+    re.compile(r"(?:requires?|required|minimum|min\.?|at least|preferred)\b[^.;]{0,40}?(\d+)\s*\+?\s*(?:years?|yrs?)\b"),
+    re.compile(r"(\d+)\+\s*(?:years?|yrs?)\b"),
+    re.compile(r"(\d+)\s*\+?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:experience|exp)\b[^.;]{0,20}?\b(?:required|preferred)\b"),
 )
+# Negated requirements must not score as requirements (B-G2-01): "no/not X
+# required" is the absence of a requirement, not a requirement.
+_DEGREE_NEGATED = (
+    re.compile(r"\bno\b[^.;]{0,40}\bbachelor'?s?\b[^.;]{0,20}\brequired\b"),
+    re.compile(r"\bbachelor'?s?\b[^.;]{0,20}\bnot required\b"),
+    re.compile(r"\bno\b[^.;]{0,20}\bdegree\b[^.;]{0,20}\brequired\b"),
+)
+_CERT_NEGATED = (
+    re.compile(r"\bno\b[^.;]{0,40}\b(?:comptia|network\+|security\+|ccna|itil)(?![a-z0-9])[^.;]{0,20}\brequired\b"),
+    re.compile(r"\b(?:comptia|network\+|security\+|ccna|itil)(?![a-z0-9])[^.;]{0,20}\bnot required\b"),
+    re.compile(r"\bno\b[^.;]{0,20}\bcertification\b[^.;]{0,20}\brequired\b"),
+    re.compile(r"\ba\+[^.;]{0,20}\bnot required\b"),
+)
+_NEGATED_FLEXIBLE = re.compile(r"\b(?:not|no) flexible\b")
+_NEGATED_HYBRID = re.compile(r"\b(?:not|no) hybrid\b")
 _DEGREE_REQUIRED = (
     re.compile(r"\bbachelor'?s?\b[^.;]{0,40}\b(?:required|must have|requires?|mandatory)\b"),
     re.compile(r"\b(?:required|must have)\b[^.;]{0,40}\bbachelor'?s?\b"),
@@ -56,8 +89,8 @@ _DEGREE_PREFERRED = re.compile(
     r"\bbachelor'?s?\b[^.;]{0,40}\bpreferred\b|\bpreferred\b[^.;]{0,40}\bbachelor'?s?\b"
 )
 _CERT_REQUIRED = (
-    re.compile(r"\b(?:comptia|network\+|security\+|ccna|itil)\b[^.;]{0,30}\brequired\b"),
-    re.compile(r"\b(?:required|must have)\b[^.;]{0,30}\b(?:comptia|network\+|security\+|ccna|itil)\b"),
+    re.compile(r"\b(?:comptia|network\+|security\+|ccna|itil)(?![a-z0-9])[^.;]{0,30}\brequired\b"),
+    re.compile(r"\b(?:required|must have)\b[^.;]{0,30}\b(?:comptia|network\+|security\+|ccna|itil)(?![a-z0-9])"),
     re.compile(r"\ba\+[^.;]{0,30}\brequired\b"),
 )
 
@@ -88,16 +121,16 @@ class RankedResults:
     excluded: tuple[RankedResult, ...]
 
 
-def _factor(name: str, raw: float, evidence: str) -> FitFactor:
-    weight = FIT_WEIGHTS[name]
+def _factor(name: str, raw: float, evidence: str, weights: dict) -> FitFactor:
+    weight = weights[name]
     return FitFactor(name, weight, raw, weight * raw, evidence)
 
 
-def _skills_factor(evaluation: Evaluation) -> FitFactor:
+def _skills_factor(evaluation: Evaluation, weights: dict) -> FitFactor:
     relevance = evaluation.relevance
     factor = next((f for f in relevance.factors if f.name == "technical_alignment"), None)
     if factor is not None:
-        return _factor("skills", factor.raw, factor.evidence)
+        return _factor("skills", factor.raw, factor.evidence, weights)
     text = f"{evaluation.posting.title} {evaluation.posting.details}".casefold()
     hits = [kw for kw in _TECHNICAL if kw in text]
     raw = min(1.0, len(hits) / 3.0)
@@ -105,18 +138,18 @@ def _skills_factor(evaluation: Evaluation) -> FitFactor:
         f"posting mentions: {', '.join(sorted(set(hits)))}" if hits
         else "posting mentions no target technical terms"
     )
-    return _factor("skills", raw, evidence)
+    return _factor("skills", raw, evidence, weights)
 
 
-def _growth_factor(evaluation: Evaluation) -> FitFactor:
+def _growth_factor(evaluation: Evaluation, weights: dict) -> FitFactor:
     text = f"{evaluation.posting.title} {evaluation.posting.details}".casefold()
-    hits = sorted({term for term in _GROWTH_TERMS if term in text})
+    hits = sorted({name for name, rx in _GROWTH_CONCEPTS if rx.search(text)})
     raw = min(1.0, len(hits) / 2.0)
     evidence = (
         f"growth signals: {', '.join(hits)}" if hits
         else "no career-growth language in posting (no training, certification, or advancement mention)"
     )
-    return _factor("career_growth", raw, evidence)
+    return _factor("career_growth", raw, evidence, weights)
 
 
 def _required_years(text: str) -> int | None:
@@ -126,7 +159,7 @@ def _required_years(text: str) -> int | None:
     return max(years) if years else None
 
 
-def _requirements_factor(evaluation: Evaluation) -> FitFactor:
+def _requirements_factor(evaluation: Evaluation, weights: dict) -> FitFactor:
     text = f"{evaluation.posting.title} {evaluation.posting.details}".casefold()
     years = _required_years(text)
     if years is None:
@@ -135,7 +168,12 @@ def _requirements_factor(evaluation: Evaluation) -> FitFactor:
     else:
         experience_raw = max(0.0, 1.0 - years / 6.0)
         experience_note = f"requires {years}+ years of experience"
-    if any(rx.search(text) for rx in _DEGREE_REQUIRED):
+    if any(rx.search(text) for rx in _DEGREE_NEGATED):
+        degree_raw = 0.75 if _DEGREE_PREFERRED.search(text) else 1.0
+        degree_note = "bachelor's degree not required" + (
+            " (preferred)" if _DEGREE_PREFERRED.search(text) else ""
+        )
+    elif any(rx.search(text) for rx in _DEGREE_REQUIRED):
         degree_raw = 0.5
         degree_note = "bachelor's degree required"
     elif _DEGREE_PREFERRED.search(text):
@@ -144,7 +182,10 @@ def _requirements_factor(evaluation: Evaluation) -> FitFactor:
     else:
         degree_raw = 1.0
         degree_note = "no degree requirement stated"
-    if any(rx.search(text) for rx in _CERT_REQUIRED):
+    if any(rx.search(text) for rx in _CERT_NEGATED):
+        cert_raw = 1.0
+        cert_note = "no certification requirement stated"
+    elif any(rx.search(text) for rx in _CERT_REQUIRED):
         cert_raw = 0.7
         cert_note = "certification required"
     else:
@@ -158,20 +199,23 @@ def _requirements_factor(evaluation: Evaluation) -> FitFactor:
         binding.append(degree_note)
     if cert_raw == raw:
         binding.append(cert_note)
-    return _factor("hiring_requirements", raw, "; ".join(binding))
+    return _factor("hiring_requirements", raw, "; ".join(binding), weights)
 
 
-def _commute_factor(evaluation: Evaluation) -> FitFactor:
+def _commute_factor(evaluation: Evaluation, weights: dict) -> FitFactor:
     decision = evaluation.decision
     reason = next(r for r in decision.reasons if r.factor == "location")
     base = {"pass": 1.0, "review": 0.5, "exclude": 0.0}.get(reason.outcome, 0.5)
     text = f"{evaluation.posting.title} {evaluation.posting.details}".casefold()
-    perk = "flexible" in text or "hybrid" in text
+    perk = (
+        ("flexible" in text and not _NEGATED_FLEXIBLE.search(text))
+        or ("hybrid" in text and not _NEGATED_HYBRID.search(text))
+    )
     raw = min(1.0, base + 0.1) if perk and base > 0.0 else base
     evidence = reason.evidence
     if perk and base > 0.0:
         evidence += "; flexible/hybrid scheduling mentioned"
-    return _factor("commute_schedule", raw, evidence)
+    return _factor("commute_schedule", raw, evidence, weights)
 
 
 def _comp_factor(contract: ResultContract, policy: Policy) -> FitFactor:
@@ -180,19 +224,20 @@ def _comp_factor(contract: ResultContract, policy: Policy) -> FitFactor:
     current = pay.current_annual
     low = pay.annual_low
     high = pay.annual_high
+    weights = policy.fit_weights
     if low is not None:
         if low >= current:
-            return _factor("comp", 1.0, f"pay above current $21/hr (annualized low {low:.2f})")
+            return _factor("comp", 1.0, f"pay above current $21/hr (annualized low {low:.2f})", weights)
         if floor is not None and low >= floor:
-            return _factor("comp", 0.75, f"pay meets the $19/hr floor but below current $21/hr (annualized low {low:.2f})")
+            return _factor("comp", 0.75, f"pay meets the $19/hr floor but below current $21/hr (annualized low {low:.2f})", weights)
         if high is not None and floor is not None and high >= floor:
-            return _factor("comp", 0.5, f"pay range straddles the $19/hr floor (low {low:.2f} below, high {high:.2f} above)")
-        return _factor("comp", 0.0, f"pay below the $19/hr floor (annualized low {low:.2f})")
+            return _factor("comp", 0.5, f"pay range straddles the $19/hr floor (low {low:.2f} below, high {high:.2f} above)", weights)
+        return _factor("comp", 0.0, f"pay below the $19/hr floor (annualized low {low:.2f})", weights)
     if high is not None:
         if floor is not None and high >= floor:
-            return _factor("comp", 0.5, f"pay stated as an upper bound only (high {high:.2f}); no guaranteed low")
-        return _factor("comp", 0.0, f"pay upper bound below the $19/hr floor (high {high:.2f})")
-    return _factor("comp", 0.0, "pay unknown; remains unknown (not fabricated)")
+            return _factor("comp", 0.5, f"pay stated as an upper bound only (high {high:.2f}); no guaranteed low", weights)
+        return _factor("comp", 0.0, f"pay upper bound below the $19/hr floor (high {high:.2f})", weights)
+    return _factor("comp", 0.0, "pay unknown; remains unknown (not fabricated)", weights)
 
 
 def _gap_for(factor: FitFactor) -> str | None:
@@ -210,11 +255,12 @@ def _gap_for(factor: FitFactor) -> str | None:
 
 
 def fit_factors(evaluation: Evaluation, contract: ResultContract, policy: Policy) -> tuple[FitFactor, ...]:
+    weights = policy.fit_weights
     return (
-        _skills_factor(evaluation),
-        _growth_factor(evaluation),
-        _requirements_factor(evaluation),
-        _commute_factor(evaluation),
+        _skills_factor(evaluation, weights),
+        _growth_factor(evaluation, weights),
+        _requirements_factor(evaluation, weights),
+        _commute_factor(evaluation, weights),
         _comp_factor(contract, policy),
     )
 
