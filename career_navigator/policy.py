@@ -28,4 +28,8 @@ class Policy:
     hours_per_week: float = 40.0
     weeks_per_year: float = 52.0
     priority_threshold: float = 60.0
+    # Fit-score bands for the ranking engine (CN-005). Muse defaults, tunable;
+    # not a Kyle decision. The 30/30/20/10/10 weights are the blueprint's.
+    fit_strong_threshold: float = 70.0
+    fit_realistic_threshold: float = 45.0
     weights: dict = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
