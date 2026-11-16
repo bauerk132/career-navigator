@@ -14,6 +14,11 @@ Explicit PA applicant exclusions (cannot employ / rejects / residents cannot
 apply) beat nationwide or PA remote text. Labeled or soft geographic
 qualifiers (Region: Canada, Location: NY, NY required) that conflict with the
 remote scope go to review; alone they never hard-reject (Fix Round 2).
+Verb-only hiring prohibitions (cannot hire in PA) and exclusion-list headings
+(Excluded states: PA) exclude without an applicant noun; negated US candidate
+scope excludes, contradictory scope goes to review; conditional approvals
+(if approved / subject to approval) go to review unless explicitly granted
+(Fix Round 3).
 """
 import re
 
@@ -51,11 +56,40 @@ _GEO_ONLY = re.compile(r"\b([a-z][a-z ,.&]*?)\s+only\b")
 _REMOTE_SUFFIX = re.compile(r"\bremote\b\s*[-–—(,:]\s*([a-z][a-z ,.&]*?)\s*\)?\s*$")
 _PA = re.compile(r"\bpennsylvania\b|\bpa\b")
 _PA_EXCLUDED = (
-    re.compile(r"\b(?:not|no|excluding|except|excludes?|outside)\b[^.;]{0,40}\b(?:pennsylvania|pa)\b"),
+    # "enough" marks a logistical quantity observation, never a legal restriction.
+    re.compile(r"\b(?:not|no|excluding|excluded|except|excludes?|outside|ineligible)\b(?![^.;]{0,40}\benough\b)[^.;]{0,40}\b(?:pennsylvania|pa)\b"),
     re.compile(r"\b(?:pennsylvania|pa)\b[^.;]{0,30}\b(?:excluded|ineligible|not eligible|not available|not accepted)\b"),
     re.compile(r"\b(?:cannot|can not|can't|won't|will not|unable to|rejects?|refuses?|declines?|prohibits?)\b[^.;]{0,30}\b(?:pennsylvania|pa)\b\s+(?:residents?|applicants?|candidates?)\b"),
-    re.compile(r"\b(?:pennsylvania|pa)\b\s+(?:residents?|applicants?|candidates?)\b[^.;]{0,20}\b(?:cannot|can not|can't|won't|will not|may not|are not|is not|do not|does not|need not|not)\b[^.;]{0,20}\b(?:apply|qualify|considered|eligible|hired|employed)\b"),
+    re.compile(r"\b(?:pennsylvania|pa)\b\s+(?:residents?|applicants?|candidates?)\b[^.;]{0,20}\b(?:cannot|can not|can't|won't|will not|may not|are not|is not|do not|does not|need not|not)\b[^.;]{0,20}\b(?:apply|qualify|considered|eligible|hired|employed|welcome)\b"),
     re.compile(r"\b(?:cannot|can not|can't|may not|must not|will not|unable to)\b\s+(?:reside|live|be based|be located)\b[^.;]{0,20}\b(?:pennsylvania|pa)\b"),
+    # Verb-only prohibition: the hiring verb must sit directly on "in/from PA",
+    # so logistical objects ("cannot hire enough engineers in PA") never match.
+    re.compile(r"\b(?:cannot|can not|can't|won't|will not|unable to|do not|does not|don't|doesn't|refuses? to|declines? to|prohibits?)\s+(?:hire|hiring|employ|employing|recruit|recruiting)\s+(?:in|from)\s+(?:pennsylvania|pa)\b"),
+    # Exclusion-list heading; the enumeration stays inside one sentence.
+    re.compile(r"\b(?:excluded|ineligible)\s+(?:states?|locations?|regions?|jurisdictions?)\s*:\s*[^.]{0,300}?\b(?:pennsylvania|pa)\b"),
+    # Candidate noun before PA, passive negation ("Candidates in PA cannot be hired").
+    re.compile(r"\b(?:applicants?|candidates?|residents?|workers?|employees?)\s+(?:in|from)\s+(?:pennsylvania|pa)\b[^.;]{0,20}\b(?:cannot|can not|can't|won't|will not|may not|are not|is not|do not|does not|not)\b[^.;]{0,20}\b(?:apply|qualify|considered|eligible|hired|employed|welcome)\b(?![^.;]{0,15}\benough\b)"),
+)
+# Negated US-wide candidate scope prohibits US applicants, Pennsylvania included.
+_US_SCOPE_NEGATED = (
+    re.compile(r"\b(?:not|no|never)\s+(?:longer\s+)?(?:open|available|accepting|accepted|hiring|recruiting|employing)\b[^.;]{0,40}?\b(?:in\s+(?:the\s+)?(?:u\.s\.|usa|us|united states)|(?:u\.s\.|usa|us|united states)\s+(?:residents?|applicants?|candidates?))(?![a-z])"),
+    re.compile(r"\b(?:cannot|can not|can't|won't|will not|unable to|do not|does not|don't|doesn't)\s+(?:accept|consider|hire|employ|recruit|welcome)\s+(?:(?:in|from)\s+(?:the\s+)?(?:u\.s\.|usa|us|united states)(?![a-z])|(?:the\s+)?(?:u\.s\.|usa|us|united states)[-\s](?:based\s+)?(?:applicants?|candidates?|residents?|workers?|employees?)\b)"),
+    re.compile(r"\b(?:u\.s\.|usa|us|united states)\s+(?:applicants?|candidates?|residents?)\s+(?:are\s+|will be\s+)?not\s+(?:welcome|accepted|eligible|considered|encouraged)\b"),
+)
+_US_SCOPE_POSITIVE = re.compile(
+    r"\b(?:u\.s\.|usa|us|united states)\s+(?:applicants?|candidates?|residents?)\s+(?:are\s+|will be\s+)?(?:welcome|encouraged|accepted|eligible)\b"
+    r"|\b(?:welcome|welcomes|welcoming)\s+(?:u\.s\.|usa|us|united states)\s+(?:applicants?|candidates?|residents?)\b"
+)
+_APPROVAL_CONDITIONAL = (
+    re.compile(r"\bif\s+(?:approved|authorized)\b"),
+    re.compile(r"\bif\b[^.;]{0,30}\b(?:approval|authorization)\b"),
+    re.compile(r"\b(?:subject to|pending|upon|contingent on|contingent upon)\b[^.;]{0,20}\b(?:approval|authorization)\b"),
+)
+# Only completed-grant wording counts; present tense ("if approval is granted")
+# stays conditional.
+_APPROVAL_GRANTED = re.compile(
+    r"\b(?:approval|authorization)\s+(?:(?:has|have|had)\s+been\s+|was\s+|were\s+)?(?:granted|obtained|received|confirmed|given)\b"
+    r"|\b(?:granted|obtained|received|confirmed)\s+(?:approval|authorization)\b"
 )
 _NATIONWIDE = re.compile(
     r"\b(?:united states|nationwide|any (?:us )?state|all (?:50 )?states)\b|\bu\.s\.|\bus\s+only\b"
@@ -223,6 +257,15 @@ def _remote_location_reason(loc: str, details: str, policy: Policy) -> Reason:
     kinds = {_classify_region(r) for r in regions}
     if any(rx.search(text) for rx in _PA_EXCLUDED):
         return Reason("location", "exclude", "remote explicitly excludes Pennsylvania (posting text)")
+    if any(rx.search(text) for rx in _US_SCOPE_NEGATED):
+        if _US_SCOPE_POSITIVE.search(text):
+            return Reason("location", "review",
+                          "contradictory US candidate scope: negated and welcome evidence; review")
+        return Reason("location", "exclude",
+                      "remote posting negates US-wide candidate scope; Pennsylvania included in prohibition")
+    if any(rx.search(text) for rx in _APPROVAL_CONDITIONAL) and not _APPROVAL_GRANTED.search(text):
+        return Reason("location", "review",
+                      "remote scope conditional on approval/authorization; Needs Review (grant not evidenced)")
     pa_mentioned = bool(_PA.search(text))
     qualifiers = _geo_qualifiers(loc, details)
     if qualifiers:
