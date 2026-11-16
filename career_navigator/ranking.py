@@ -60,7 +60,12 @@ _GROWTH_CONCEPTS = (
     ("promotion", re.compile(r"\bpromot\w*\b")),
 )
 _GUARDED_GROWTH_CONCEPTS = frozenset({"training", "certification"})
-_REQUIREMENT_ANCHOR = re.compile(r"\b(?:required|must have|requires?|minimum|preferred)\b")
+# "mandatory" is a requirement word (B3-N1: "Mandatory certification." /
+# "Certification is mandatory." are requirements, not offered growth).
+# "need/needs/necessary/essential" are deliberately NOT anchors: they also
+# describe offered growth ("the training you need to succeed"), so adding
+# them would suppress genuine growth signals.
+_REQUIREMENT_ANCHOR = re.compile(r"\b(?:required|must have|requires?|minimum|preferred|mandatory)\b")
 # Years are extracted only when framed as a requirement for the candidate
 # (B-G2-02): a requirement anchor before the number, a "+" minimum marker,
 # or required/preferred right after. Employer-history boilerplate
@@ -86,10 +91,11 @@ _CERT_NEGATED = (
 )
 # Negated perks must not add the bonus or the evidence (B-G2-01). The guard
 # allows a short gap so "not very flexible" / "isn't flexible" / "never
-# hybrid" are caught too (B2-N1); the 12-char window keeps a negation from
-# reaching across a clause ("not flexible, but hybrid" stays hybrid).
-_NEGATED_FLEXIBLE = re.compile(r"\b(?:not|no|never|isn't|is not|aren't|are not)\b[^.;]{0,12}?\bflexible\b")
-_NEGATED_HYBRID = re.compile(r"\b(?:not|no|never|isn't|is not|aren't|are not)\b[^.;]{0,12}?\bhybrid\b")
+# hybrid" are caught too (B2-N1); the gap excludes commas (B3-N3) so a
+# negation cannot reach across a clause ("This is not remote, flexible
+# schedule offered." keeps the flexible perk).
+_NEGATED_FLEXIBLE = re.compile(r"\b(?:not|no|never|isn't|is not|aren't|are not)\b[^.;,]{0,12}?\bflexible\b")
+_NEGATED_HYBRID = re.compile(r"\b(?:not|no|never|isn't|is not|aren't|are not)\b[^.;,]{0,12}?\bhybrid\b")
 _DEGREE_REQUIRED = (
     re.compile(r"\bbachelor'?s?\b[^.;]{0,40}\b(?:required|must have|requires?|mandatory)\b"),
     re.compile(r"\b(?:required|must have)\b[^.;]{0,40}\bbachelor'?s?\b"),
@@ -156,13 +162,19 @@ def _concept_present(text: str, name: str, pattern) -> bool:
     requirement. Training/certification are guarded on BOTH sides of the
     term within the sentence (B2-R1): a requirement anchor before the term
     ("Must have CompTIA certification.") leaks into growth just as one
-    after it ("Certification required.") does."""
+    after it ("Certification required.") does. The before-search covers
+    the FULL preceding sentence fragment (B3-R1): a 30-char window cuts
+    off anchors before a cert list ("Must have CompTIA A+, Network+, or
+    Security+ certification."). The after-search keeps its 30-char window
+    and is clause-aware (B3-N2): a "minimum" about pay/hours in a later
+    clause ("We provide training, minimum starting pay $25/hour.") must
+    not suppress genuinely offered training."""
     for match in pattern.finditer(text):
         if name in _GUARDED_GROWTH_CONCEPTS:
-            before = re.split(r"[.;!?]", text[max(0, match.start() - 30):match.start()])[-1]
+            before = re.split(r"[.;!?]", text[:match.start()])[-1]
             if _REQUIREMENT_ANCHOR.search(before):
                 continue
-            after = re.split(r"[.;!?]", text[match.end():match.end() + 30])[0]
+            after = re.split(r"[.;!?,]", text[match.end():match.end() + 30])[0]
             if _REQUIREMENT_ANCHOR.search(after):
                 continue
         return True
@@ -195,8 +207,11 @@ def _sentence_kinds(text: str, positive_patterns, negated_patterns):
     so the negation must win within one sentence — but a positive
     requirement in ANOTHER sentence (multi-track) is conservative and wins
     overall. The [^.;] windows never cross a sentence boundary, so
-    splitting first changes nothing for single-sentence text."""
-    sentences = [s for s in re.split(r"[.;!?]", text) if s.strip()]
+    splitting first changes nothing for single-sentence text. Clauses
+    count separately (B3-N4): in comma-joined contradictory text
+    ("Security+ certification required, no certification required for
+    interns.") the explicit positive requirement wins."""
+    sentences = [s for s in re.split(r"[.;!?,]", text) if s.strip()]
     has_positive = has_negated = False
     for sentence in sentences:
         if any(rx.search(sentence) for rx in negated_patterns):

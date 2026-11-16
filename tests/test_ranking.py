@@ -312,6 +312,14 @@ class FixRoundBTests(unittest.TestCase):
         self.assertEqual(commute.raw, 0.6)
         self.assertIn("flexible", commute.evidence)
 
+    # B3-N3: the perk-negation gap excludes commas, so a negation cannot
+    # reach across a clause ("not remote" must not suppress "flexible").
+    def test_not_remote_flexible_schedule_keeps_perk(self):
+        p = posting(location="Remote", details="This is not remote, flexible schedule offered.")
+        commute = factor(ranked(p), "commute_schedule")
+        self.assertEqual(commute.raw, 0.6)
+        self.assertIn("flexible", commute.evidence)
+
     def test_degree_required_still_scores(self):
         p = posting(details="Bachelor's degree required.")
         self.assertEqual(factor(ranked(p), "hiring_requirements").raw, 0.5)
@@ -324,6 +332,12 @@ class FixRoundBTests(unittest.TestCase):
 
     def test_cert_required_for_senior_track_beats_not_required_for_entry(self):
         p = posting(details="No certification required for entry. CompTIA A+ required for senior track.")
+        self.assertEqual(factor(ranked(p), "hiring_requirements").raw, 0.7)
+
+    # B3-N4: clauses count separately — in comma-joined contradictory text
+    # the explicit positive requirement wins.
+    def test_cert_required_beats_not_required_for_interns_in_same_sentence(self):
+        p = posting(details="Security+ certification required, no certification required for interns.")
         self.assertEqual(factor(ranked(p), "hiring_requirements").raw, 0.7)
 
     # B-G2-02: years count only in a candidate-requirement framing.
@@ -391,6 +405,45 @@ class FixRoundBTests(unittest.TestCase):
 
     def test_growth_in_next_sentence_still_counts(self):
         p = posting(details="Must have CompTIA certification. Training provided.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+
+    # B3-R1: the before-guard covers the FULL preceding sentence fragment —
+    # a 30-char window cuts off the anchor before a cert list ("Must have
+    # CompTIA A+, Network+, or Security+ certification."). The title gives
+    # skills 1.0 so the fit lands exactly on the reviewer's 64.00 Realistic.
+    def test_cert_list_a_plus_or_security_plus_is_not_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Must have a valid CompTIA A+ or Security+ certification.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(factor(ranked(p), "hiring_requirements").raw, 0.7)
+        self.assertEqual(ranked(p).fit_score, 64.00)
+        self.assertEqual(ranked(p).final_classification, "Realistic")
+
+    def test_cert_list_with_network_plus_is_not_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Must have CompTIA A+, Network+, or Security+ certification.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(factor(ranked(p), "hiring_requirements").raw, 0.7)
+        self.assertEqual(ranked(p).fit_score, 64.00)
+        self.assertEqual(ranked(p).final_classification, "Realistic")
+
+    # B3-N1: "mandatory" is a requirement anchor.
+    def test_mandatory_certification_is_not_growth(self):
+        p = posting(details="Mandatory certification.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+
+    def test_certification_is_mandatory_is_not_growth(self):
+        p = posting(details="Certification is mandatory.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+
+    # B3-N2: the after-guard is clause-aware — a "minimum" about pay/hours
+    # in a later clause must not suppress genuinely offered training.
+    def test_training_with_minimum_pay_in_next_clause_is_growth(self):
+        p = posting(details="We provide training, minimum starting pay $25/hour.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+
+    def test_training_with_minimum_hours_in_next_clause_is_growth(self):
+        p = posting(details="We offer paid training, minimum 40 hours per week.")
         self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
 
     # B-G1-01: fit weights are Policy-configurable with validation.

@@ -56,6 +56,26 @@
   (`7cefeccb`) as GO for API/dashboard fit (hof_01M7J3XN8N4FVZDSN0); Qoder
   re-reviewed Fix Round C (`7cefeccb`) as GO for its own scope, gated on
   the B fix round (hof_01M7J4EDZBNHP82HGA).
+- **Fix Round B3** — Qoder re-review of Fix Round B2 (`6a2f637`) was NO-GO:
+  all 5 claimed fixes verified in core cases, 1 residual Major B3-R1
+  (30-char before-window leaks on standard cert-list phrasing — "Must
+  have CompTIA A+, Network+, or Security+ certification." scored growth
+  0.50 and flipped to Strong Fit 79.00; correct is 64.00 Realistic) + 4
+  nits. Fix round: B3-R1 before-guard covers the FULL preceding sentence
+  fragment (no 30-char cap); B3-N1 "mandatory" added to the requirement
+  anchors ("need/needs/necessary/essential" deliberately NOT added — they
+  also describe offered growth, e.g. "the training you need"); B3-N2
+  after-guard is clause-aware (a "minimum" about pay/hours in a later
+  clause no longer suppresses offered training); B3-N3 perk-negation gap
+  excludes commas (a negation cannot reach across a clause); B3-N4
+  requirement precedence is clause-aware (in comma-joined contradictory
+  text the explicit positive requirement wins). 8 new regression tests
+  (72 ranking tests total).
+- **Verification after Fix Round B3:** 323/323 tests, demo byte-identical,
+  corpus 40/40, controls 7/7, live uvicorn smoke 9 shortlist / 5 review /
+  5 excluded / 19 total, 19 unique job ids, no deprecation warnings.
+  Antigravity re-reviewed Fix Round B2 (`6a2f637`) as GO for API/dashboard
+  fit (hof_01M7J59H49W98NRJVH).
 
 ## 1. Location and baseline
 
