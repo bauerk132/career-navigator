@@ -10,6 +10,10 @@ go to Needs Review (Kyle 2026-11-15). Remote geography follows explicit
 Pennsylvania evidence: open => pass, excludes => exclude, unclear/unstated =>
 review; nationwide US scope includes Pennsylvania. Geographic "only" phrases
 must be genuinely geographic; incidental state mentions never restrict.
+Explicit PA applicant exclusions (cannot employ / rejects / residents cannot
+apply) beat nationwide or PA remote text. Labeled or soft geographic
+qualifiers (Region: Canada, Location: NY, NY required) that conflict with the
+remote scope go to review; alone they never hard-reject (Fix Round 2).
 """
 import re
 
@@ -49,6 +53,9 @@ _PA = re.compile(r"\bpennsylvania\b|\bpa\b")
 _PA_EXCLUDED = (
     re.compile(r"\b(?:not|no|excluding|except|excludes?|outside)\b[^.;]{0,40}\b(?:pennsylvania|pa)\b"),
     re.compile(r"\b(?:pennsylvania|pa)\b[^.;]{0,30}\b(?:excluded|ineligible|not eligible|not available|not accepted)\b"),
+    re.compile(r"\b(?:cannot|can not|can't|won't|will not|unable to|rejects?|refuses?|declines?|prohibits?)\b[^.;]{0,30}\b(?:pennsylvania|pa)\b\s+(?:residents?|applicants?|candidates?)\b"),
+    re.compile(r"\b(?:pennsylvania|pa)\b\s+(?:residents?|applicants?|candidates?)\b[^.;]{0,20}\b(?:cannot|can not|can't|won't|will not|may not|are not|is not|do not|does not|need not|not)\b[^.;]{0,20}\b(?:apply|qualify|considered|eligible|hired|employed)\b"),
+    re.compile(r"\b(?:cannot|can not|can't|may not|must not|will not|unable to)\b\s+(?:reside|live|be based|be located)\b[^.;]{0,20}\b(?:pennsylvania|pa)\b"),
 )
 _NATIONWIDE = re.compile(
     r"\b(?:united states|nationwide|any (?:us )?state|all (?:50 )?states)\b|\bu\.s\.|\bus\s+only\b"
@@ -98,6 +105,25 @@ _INCIDENTAL_SUBJECT = re.compile(
 _CANDIDATE_CONTEXT = re.compile(
     r"\b(?:applicants?|candidates?|employees?|workers?|you|must|reside|residents?)\b"
 )
+# Labeled geographic fields are explicit location claims; their values are
+# consumed without a vocabulary guard. Soft phrases need a strong geographic
+# token so "Python required" / "CDL required" never invent a region.
+_GEO_LABEL = re.compile(
+    r"\b(?:geographic\s+region|location|region|territory|area|country|state|province)\s*:\s*([a-z][a-z ,.&-]*?)(?=\s*[.;]|\s*$)"
+)
+_GEO_SOFT = re.compile(r"\b([a-z][a-z ,&-]*?)\s+(?:required|preferred|mandatory)\b")
+_GEO_WITHIN = re.compile(r"\bwithin\s+([a-z][a-z ,&-]*?)(?=\s*[.;]|\s*$)")
+_GEO_LIMITED = re.compile(r"\blimited to\s+([a-z][a-z ,&-]*?)(?=\s*[.;]|\s*$)")
+_GEO_WORK_FROM = re.compile(r"\bwork from\s+([a-z][a-z ,&-]*?)(?=\s*[.;]|\s*$)")
+_GEO_BASED = re.compile(r"\b([a-z][a-z-]*?)-based\b")
+_FOREIGN_GEO = frozenset({
+    "canada", "ontario", "quebec", "alberta", "manitoba", "saskatchewan",
+    "british columbia", "newfoundland", "nova scotia", "new brunswick",
+    "germany", "france", "mexico", "india", "australia", "japan", "china",
+    "brazil", "spain", "italy", "netherlands", "ireland", "new zealand",
+    "uk", "united kingdom", "england", "scotland", "wales",
+})
+_STRONG_GEO = _GEO_SAFE | _FOREIGN_GEO
 
 
 def _has_technical(text: str) -> list[str]:
@@ -158,6 +184,22 @@ def _incidental_subject(text: str, start: int) -> bool:
     return bool(_INCIDENTAL_SUBJECT.search(prefix)) and not _CANDIDATE_CONTEXT.search(prefix)
 
 
+def _has_strong_geo(phrase: str) -> bool:
+    return any(t in _STRONG_GEO for t in re.findall(r"[a-z.]+", phrase))
+
+
+def _geo_qualifiers(loc: str, details: str) -> list[str]:
+    values = []
+    for field_text in (loc, details):
+        values.extend(m.group(1).strip() for m in _GEO_LABEL.finditer(field_text))
+        for rx in (_GEO_SOFT, _GEO_WITHIN, _GEO_LIMITED, _GEO_WORK_FROM, _GEO_BASED):
+            for m in rx.finditer(field_text):
+                phrase = m.group(1).strip()
+                if _has_strong_geo(phrase):
+                    values.append(phrase)
+    return [v for v in values if v]
+
+
 def _remote_location_reason(loc: str, details: str, policy: Policy) -> Reason:
     if not policy.allow_remote:
         return Reason("location", "exclude", "remote not allowed by policy")
@@ -182,6 +224,24 @@ def _remote_location_reason(loc: str, details: str, policy: Policy) -> Reason:
     if any(rx.search(text) for rx in _PA_EXCLUDED):
         return Reason("location", "exclude", "remote explicitly excludes Pennsylvania (posting text)")
     pa_mentioned = bool(_PA.search(text))
+    qualifiers = _geo_qualifiers(loc, details)
+    if qualifiers:
+        qkinds = {_classify_region(q) for q in qualifiers}
+        incompatible = qkinds - {"pa", "nationwide"}
+        if incompatible:
+            if kinds or pa_mentioned or _NATIONWIDE_TEXT.search(text):
+                return Reason("location", "review",
+                              f"conflicting remote geographic qualifier: {', '.join(qualifiers)} "
+                              f"vs {', '.join(regions) or 'remote scope'}; review")
+            return Reason("location", "review",
+                          f"remote geographic qualifier ambiguous: {', '.join(qualifiers)}; "
+                          "Needs Review (not inferred)")
+        if "other" in kinds:
+            return Reason("location", "review",
+                          f"conflicting remote geographic qualifier: {', '.join(qualifiers)} "
+                          f"vs {', '.join(regions)}; review")
+        regions.extend(qualifiers)
+        kinds |= qkinds
     if pa_mentioned and "other" in kinds:
         return Reason("location", "review",
                       "conflicting remote geographic evidence: Pennsylvania and other-state restriction; review")

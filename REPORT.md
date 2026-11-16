@@ -139,3 +139,69 @@ Live JobFinder integration, real-schema verification, migrations, persistence/HT
 - `_RESTRICTION` anchors limited to reside in / live in / residents of; incidental-subject guard is a sentence-prefix heuristic.
 - G2-04 remote-city scope expansion deferred.
 - Independent G1/G2 review of this commit pending; live integration/merge still gated.
+
+## 8. Fix Round 2 (2026-11-16) — branch `cn/fix-round-2-qoder`, review candidate
+
+- **Authority:** GPT Orchestrator handoff "Fix Round 2: PA restrictions and geography conflicts" (Notion `41a2b8e72a0881068823ffa8f4563f6d`, P1, release-blocking; merge decision NO-GO on `4330052`).
+- **Isolation:** new sibling worktree `C:\Users\kbaue\Documents\Qoder\2026-11-14\2ba455d7\career-navigator-fix-round-2`, branch `cn/fix-round-2-qoder`, created from exact `4330052dd7570e1594a4908a4c8145abef5dc1dd` (parent `6da566312ef8875028810e28e94b56738425cc5c`, verified). Hermes's dirty `cn/policy-decisions` worktree read-only throughout (status identical before/after); JobFinder untouched (read-only status identical). Not merged, not pushed, no remotes.
+- **Ownership note:** Hermes hivemind task `hof_01M7FY0MGMF14BWB19` remains `working` (never independently closed). No shared surface modified: round-2 changes live only in the new worktree; coordinator should formally stand down the overlapping Hermes task.
+
+### Fixes
+
+| Defect | Implementation |
+|---|---|
+| FR2-01 explicit PA exclusions missed | `_PA_EXCLUDED` extended with applicant-noun-anchored patterns: `cannot/can't/will not/unable to/rejects/refuses/declines/prohibits … PA residents/applicants/candidates`; `PA residents/applicants/candidates … cannot/may not/are not/need not … apply/qualify/considered/eligible/hired/employed`; `cannot/may not/must not … reside/live/be based/be located … PA`. Explicit exclusion still beats nationwide/PA remote text. Applicant-noun anchor prevents false exclusion of e.g. "cannot hire enough engineers in Pennsylvania". |
+| FR2-02 conflicting/unconsumed qualifiers | New `_geo_qualifiers`: labeled fields (`Location:/Region:/Geographic region:/Territory:/Area:/Country:/State:/Province:` — values consumed without vocabulary guard) plus soft phrases (`X required/preferred/mandatory`, `within X`, `limited to X`, `work from X`, `X-based`) guarded by a strong geographic token (US states/abbrs minus collisions + common foreign names), so "Python required"/"CDL required" invent nothing. Qualifier conflicting with PA/nationwide/grammar scope → review; alone under bare Remote → review (never hard-reject); compatible qualifiers (PA/US) become scope evidence and never degrade. |
+| FR2-03 preservation | No changes to pay, ranking, role/driving grammar, incidental-subject guard, or source-record semantics. All 174 prior tests unmodified and green; demo byte-identical. |
+
+### Corpus recovery and before/after (exact baseline `4330052` → new candidate)
+
+- All 40 Hermes mismatch rows recovered verbatim from his triage raw results `cn_triage_433_312.json` / `cn_triage_433_315.json` (scratch cache; script `cn_triage_433.py` and spillover source still present), originally Sol session `local-0672494ed4d8dd51b48fa5a0910ef358fd96ef30ba95d8ae6464946607c399fa`. Stable fixture: `tests/test_fix_round_2.py` (`HERMES_40`, ids H01–H40, group + allowed outcomes preserved). Reproducibility runner: `run_fix_round_2_corpus.py` (JSON per-case status/priority/location evidence, same shape as Hermes's triage).
+- Hermes's untracked experimental tests (`test_geography_blockers.py`, `test_geography_closed_grammar.py`, `test_geography_review_regressions.py`) compared read-only for phrasing ideas only (prohibits/limited-to/work-from/X-based variants); his unreviewed `geography.py` code and differing expectations were NOT transplanted.
+
+| Suite | Before (pristine 4330052) | After |
+|---|---|---|
+| Hermes 40-case corpus | 12 fixed / 28 failing (gq 0/18, ir 6/16, nc 6/6) | **40/40 fixed** (gq 18/18, ir 16/16, nc 6/6) |
+| 7 named controls | 6/7 (C3 `Remote - PA` + `Region: Canada.` eligible/high) | **7/7** |
+| FR2-01 quoted (F01–F05, strict rejected) | F01–F03 eligible; F04/F05 rejected | 5/5 rejected |
+| FR2-01 variants (V01–V15) | 12 eligible (V03/V09/V15 already rejected) | 15/15 rejected |
+| FR2-02 quoted (Q01–Q04, strict review) | Q01–Q03 eligible/high; Q04 review | 4/4 review |
+| FR2-02 variants (Q05–Q14) | 9 eligible, Q13 review | 10/10 review |
+| Compatible qualifiers (K01–K06) | K03 review, rest eligible | 6/6 eligible |
+| Antigravity 22 probes | 21/22 as documented; **A09 discrepancy** (see below) | 21/22 preserved; A09 locked at observed baseline |
+| Existing unit tests | 174/174 | 174/174 (unmodified) |
+| Full suite | 189 tests, FAILED (failures=58, errors=0) | **189 tests OK** |
+
+- Failing-before corpus ids: H01–H18, H20–H24, H28–H32 (exactly Hermes's 28). All review/rejected rows carry no priority; eligible corpus rows high. Outputs identical on Python 3.12.10 and 3.15.2.
+- **A09 discrepancy (pre-existing, not introduced here):** Antigravity's review table claims `Remote` + "Our company was founded in California. Remote across the US." → eligible, but pristine `4330052` returns review ("across the US" is not consumed by the nationwide grammar). Locked at observed baseline behavior in `test_a09_discrepancy_locked_at_observed_baseline`; flagged for coordinator decision, not silently scope-expanded.
+- The full 1,043-case matrix was NOT rerun (not required; claimed nowhere).
+
+### TDD evidence (actual commands, from worktree root)
+
+```
+PYTHONDONTWRITEBYTECODE=1 py -3.12 -m unittest discover -s tests        # RED on pristine 4330052
+  → Ran 189 tests — FAILED (failures=58, errors=0); all 58 in test_fix_round_2.py
+PYTHONDONTWRITEBYTECODE=1 py -3.15-arm64 -m unittest discover -s tests  # RED, identical
+PYTHONDONTWRITEBYTECODE=1 py -3.12 run_fix_round_2_corpus.py            # before: 12 fixed / 28 failing
+# implementation: career_navigator/eligibility.py only
+PYTHONDONTWRITEBYTECODE=1 py -3.12 -m unittest discover -s tests        # GREEN → 189 OK
+PYTHONDONTWRITEBYTECODE=1 py -3.15-arm64 -m unittest discover -s tests  # GREEN → 189 OK (log: test-output.txt)
+PYTHONDONTWRITEBYTECODE=1 py -3.12 run_fix_round_2_corpus.py            # after: 40/40, controls 7/7
+PYTHONDONTWRITEBYTECODE=1 py -3.15-arm64 -m career_navigator            # exit 0; byte-identical to demo-output.txt
+git diff --check                                                        # clean
+```
+
+- Independent-style RED-on-base re-verification: `git archive 4330052` exported to a temp sandbox + new test file copied in → `Ran 189 tests — FAILED (failures=58)` (mirrors Antigravity G1 methodology).
+- Safety: stdlib-only imports (`re`, `dataclasses`, `html`, `urllib.parse`); no network, file writes, persistence, subprocess, or live-source access added; synthetic postings only; bounded regex scans (adversarial-whitespace test included).
+
+### Files changed
+
+`career_navigator/eligibility.py` (PA exclusion grammar + qualifier consumption), `tests/test_fix_round_2.py` (new, 15 methods / 123 attributed synthetic cases in 10 tables), `run_fix_round_2_corpus.py` (new reproducibility runner), `test-output.txt` (regenerated), `REPORT.md` (§8). `demo-output.txt` unchanged (byte-identical demo).
+
+### Limitations / follow-ups
+
+- Conditional scope ("Open to candidates in PA; if approved.", "Nationwide US if approved.") and negated-scope phrases ("Not open to candidates in US.") remain unconsumed → eligible on nationwide suffix; Hermes's experimental closed-grammar treated these as review. Deferred: grammar-scope decision for coordinator.
+- "Remote across the US" / bare "Location: US." style scope wording: A09 stays review (pre-existing); compatible labeled qualifiers now pass (K03).
+- Soft-phrase guard requires a strong geographic token; unknown foreign names in soft phrases (not labeled fields) are not consumed. Labeled-field values are always consumed; unknown values → review (conservative).
+- `_RESTRICTION` anchors and incidental-subject heuristic unchanged from Round 1; G2-04 remote-city expansion still deferred.
+- Release gate: G1 then distinct independent G2 (must include the 40-case corpus) required; Qoder cannot self-approve. No merge/push/deploy/UI integration until coordinator AND Kyle explicitly approve.

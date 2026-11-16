@@ -73,6 +73,21 @@ test_open_ended_below_floor_still_review (test_fix_round_1.G203SalaryStraddleTes
 test_straddle_review_does_not_override_cdl_exclusion (test_fix_round_1.G203SalaryStraddleTests.test_straddle_review_does_not_override_cdl_exclusion) ... ok
 test_straddle_review_preserves_other_factor_outcomes (test_fix_round_1.G203SalaryStraddleTests.test_straddle_review_preserves_other_factor_outcomes) ... ok
 test_straddle_rule_uses_configured_floor (test_fix_round_1.G203SalaryStraddleTests.test_straddle_rule_uses_configured_floor) ... ok
+test_22_probes (test_fix_round_2.AntigravityProbeTests.test_22_probes) ... ok
+test_a09_discrepancy_locked_at_observed_baseline (test_fix_round_2.AntigravityProbeTests.test_a09_discrepancy_locked_at_observed_baseline) ... ok
+test_negation_and_verb_variants_exclude (test_fix_round_2.FR201ExplicitPAExclusionTests.test_negation_and_verb_variants_exclude) ... ok
+test_pa_exclusion_beats_explicit_pa_suffix (test_fix_round_2.FR201ExplicitPAExclusionTests.test_pa_exclusion_beats_explicit_pa_suffix) ... ok
+test_quoted_acceptance_cases_exclude (test_fix_round_2.FR201ExplicitPAExclusionTests.test_quoted_acceptance_cases_exclude) ... ok
+test_ambiguous_qualifier_never_hard_rejects (test_fix_round_2.FR202ConflictingQualifierTests.test_ambiguous_qualifier_never_hard_rejects) ... ok
+test_compatible_qualifiers_do_not_degrade (test_fix_round_2.FR202ConflictingQualifierTests.test_compatible_qualifiers_do_not_degrade) ... ok
+test_qualifier_variants_review (test_fix_round_2.FR202ConflictingQualifierTests.test_qualifier_variants_review) ... ok
+test_quoted_acceptance_cases_review (test_fix_round_2.FR202ConflictingQualifierTests.test_quoted_acceptance_cases_review) ... ok
+test_bounded_scan_completes_on_adversarial_whitespace (test_fix_round_2.FR203PreservationTests.test_bounded_scan_completes_on_adversarial_whitespace) ... ok
+test_incidental_boilerplate_stays_eligible (test_fix_round_2.FR203PreservationTests.test_incidental_boilerplate_stays_eligible) ... ok
+test_non_geo_required_preferred_invents_no_region (test_fix_round_2.FR203PreservationTests.test_non_geo_required_preferred_invents_no_region) ... ok
+test_unknown_remote_geography_stays_review (test_fix_round_2.FR203PreservationTests.test_unknown_remote_geography_stays_review) ... ok
+test_hermes_40_corpus (test_fix_round_2.Hermes40CorpusTests.test_hermes_40_corpus) ... ok
+test_seven_named_controls (test_fix_round_2.HermesControlTests.test_seven_named_controls) ... ok
 test_conversion_assumptions_are_explicit (test_pay.FloorTests.test_conversion_assumptions_are_explicit) ... ok
 test_exact_floor_passes (test_pay.FloorTests.test_exact_floor_passes) ... ok
 test_missing_pay_floor_is_unknown_not_false (test_pay.FloorTests.test_missing_pay_floor_is_unknown_not_false) ... ok
@@ -174,6 +189,6 @@ test_provenance_original_always_retained (test_urls.CanonicalUrlTests.test_prove
 test_unknown_provider_preserved_verbatim (test_urls.CanonicalUrlTests.test_unknown_provider_preserved_verbatim) ... ok
 
 ----------------------------------------------------------------------
-Ran 174 tests in 0.009s
+Ran 189 tests in 6.119s
 
 OK
