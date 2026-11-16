@@ -114,6 +114,50 @@
   corpus 40/40, controls 7/7, live uvicorn smoke 9 shortlist / 5 review /
   5 excluded / 19 total, 19 unique job ids, detail parity 19/19, no
   deprecation warnings.
+- **Fix Round B5** — Kyle chose the hardening round first (Nov 16, after
+  BOTH B4 re-reviews landed GO: Qoder hof_01M7JBSG22NZBEEA2Q and
+  Antigravity hof_01M7JBP04XAA4M6Q2B, merge gate open for the B/C chain).
+  Qoder's B4 verdict left 4 advisory nits (B5-N1..N4, none a merge gate).
+  B5-N3 (pre-existing class flip): imperative instruction verbs at clause
+  start counted as offered growth — "Include certification in your
+  application." scored growth 0.50 (fit 85.00; correct 70.00), and
+  combined with a degree requirement "Bachelor's degree required. Include
+  certification in your application." flipped to 75.00 Strong Fit (correct
+  60.00 Realistic). Fix: a sentence starting with an imperative
+  offer/include/provide verb (optionally after "please") is an instruction,
+  not offered growth — checked BEFORE the offer truncation, with the
+  posting title stripped from the fragment first (the text is "title +
+  details", and the title is not part of the sentence's grammar).
+  B5-N4 (pre-existing record correction): "You must give certification
+  details." was NOT guarded at either SHA (growth 0.50, fit 85.00; correct
+  70.00) because the predicate set had "must have" but not bare "must".
+  Fix: "must" + verb (give/provide/include/hold/submit/present/show/
+  complete/possess/maintain/obtain/offer) is a requirement predicate; the
+  B4-R2 truncation skips a must-governed offer verb ("must provide" is a
+  requirement, not an offer) so the predicate survives, while an offer
+  verb in a later clause still truncates ("You must give references and we
+  offer training." stays growth 0.50). B5-N2: a participle immediately
+  before the term's noun phrase is an adjective, not an offer verb —
+  "Must have certification from our offered training program." scored
+  growth 0.50 (fit 85.00; correct 70.00). Fix: the truncation uses BASE
+  forms only (offer/offers/provide/provides/include/includes); participles
+  and gerunds are excluded, so the "must have" still governs. B5-N1:
+  "We offer training, required start date is Monday." scored growth 0.00
+  (fit 70.00; correct 85.00, no class flip). Fix: a predicate directly
+  followed by a scheduling noun (start/date/time/deadline/shift/schedule/
+  location/interview/application) modifies THAT noun, not the term — via
+  new `_predicate_attaches()`, used by both guards. The set is narrow on
+  purpose: a broad noun list would break compound requirements ("Must have
+  experience and certification" — "experience" is a real requirement
+  object). Known limitations (documented, not fixed): the general
+  "required <noun>" case beyond scheduling nouns; passive "must be
+  provided"; compound "must complete the form and provide certification";
+  participle-led "Provided certification details at interview." 10 new
+  regression tests (89 ranking tests total).
+- **Verification after Fix Round B5:** 340/340 tests, demo byte-identical,
+  corpus 40/40, controls 7/7, live uvicorn smoke 9 shortlist / 5 review /
+  5 excluded / 19 total, 19 unique job ids, detail parity 19/19, no
+  deprecation warnings.
 
 ## 1. Location and baseline
 

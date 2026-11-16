@@ -501,6 +501,76 @@ class FixRoundBTests(unittest.TestCase):
         p = posting(details="Minimum starting pay $25/hour, training provided.")
         self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
 
+    # Fix Round B5 — hardening round for Qoder's B5-N1..N4 advisory nits
+    # (B4 re-review, hof_01M7JBSG22NZBEEA2Q). B5-N3 is a class flip on
+    # common posting phrasing; B5-N4 is a record correction; B5-N1/N2 are
+    # narrow regressions with no class flip.
+    # B5-N1: a predicate directly followed by a scheduling noun modifies
+    # that noun, not the term.
+    def test_required_start_date_does_not_suppress_offered_training(self):
+        p = posting(title="Network Support Technician",
+                    details="We offer training, required start date is Monday.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+        self.assertEqual(ranked(p).fit_score, 85.00)
+
+    # B5-N2: a participle ("offered") modifying the term's noun phrase is
+    # an adjective, not an offer verb — the "must have" still governs.
+    def test_must_have_cert_from_offered_training_program_is_not_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Must have certification from our offered training program.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(ranked(p).fit_score, 70.00)
+
+    # B5-N3: imperative instructions are requirements, not offered growth.
+    def test_include_certification_in_application_is_not_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Include certification in your application.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(ranked(p).fit_score, 70.00)
+
+    def test_provide_certification_details_at_interview_is_not_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Provide certification details at interview.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(ranked(p).fit_score, 70.00)
+
+    def test_degree_required_plus_include_certification_is_realistic(self):
+        p = posting(title="Network Support Technician",
+                    details="Bachelor's degree required. Include certification in your application.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(ranked(p).fit_score, 60.00)
+        self.assertEqual(ranked(p).final_classification, "Realistic")
+
+    # B5-N4: bare "must" + verb is a requirement predicate.
+    def test_must_give_certification_details_is_not_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="You must give certification details.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(ranked(p).fit_score, 70.00)
+
+    def test_must_provide_certification_details_is_not_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="You must provide certification details.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(ranked(p).fit_score, 70.00)
+
+    # Lock-ins: the B5 guards must not break the B4-R2 offer clause or
+    # genuine participle offers.
+    def test_must_give_references_and_offer_training_is_growth(self):
+        p = posting(details="You must give references and we offer training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+        # Skills 1.0 (relevance counts "it" as a technical term), so the
+        # fit is 0.30 + 0.15 + 0.20 + 0.10 + 0.10 = 85.00.
+        self.assertEqual(ranked(p).fit_score, 85.00)
+
+    def test_included_training_in_benefits_is_growth(self):
+        p = posting(details="Included training in the benefits package.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+
+    def test_offer_includes_training_is_growth(self):
+        p = posting(details="Offer includes training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+
     # B-G1-01: fit weights are Policy-configurable with validation.
     def test_default_policy_weights_are_the_blueprint(self):
         self.assertEqual(Policy().fit_weights, FIT_WEIGHTS)

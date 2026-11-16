@@ -67,14 +67,37 @@ _GUARDED_GROWTH_CONCEPTS = frozenset({"training", "certification"})
 # usually about pay/hours, not the growth term: it only counts within the
 # term's own clause (B3-N2). "need/needs/necessary/essential" are
 # deliberately NOT anchors: they also describe offered growth ("the
-# training you need to succeed").
-_REQUIREMENT_PREDICATE = re.compile(r"\b(?:required|must have|requires?|mandatory|preferred)\b")
+# training you need to succeed"). "must" + verb is a predicate (B5-N4:
+# "You must give certification details." is a requirement, not growth) —
+# but NOT "must have" in the must-verb list: "must have" is already its
+# own anchor, and the B4-R2 offer clause ("Must have 2 years of experience
+# and we offer paid training.") must stay offerable.
+_REQUIREMENT_PREDICATE = re.compile(r"\b(?:required|must have|requires?|mandatory|preferred|must\s+(?:give|provide|include|hold|submit|present|show|complete|possess|maintain|obtain|offer))\b")
 _REQUIREMENT_MINIMUM = re.compile(r"\bminimum\b")
-# Offer verbs (B4-R2): an anchor in an earlier clause must not suppress a
-# term a later clause explicitly offers ("We require 3 years of experience
-# and offer certification."). "give" is deliberately NOT an offer verb —
-# it also appears in requirements ("You must give certification details.").
-_OFFER_VERB = re.compile(r"\b(?:offer|offers|offered|offering|provide|provides|provided|providing|include|includes|included|including)\b")
+# Offer verbs for the B4-R2 truncation: BASE forms only (B5-N2). A
+# participle (offered/provided/included) immediately before the term's
+# noun phrase is an adjective, not an offer verb ("Must have certification
+# from our offered training program." is a requirement — the truncation
+# must not discard the "must have"). "give" is deliberately NOT an offer
+# verb — it also appears in requirements ("You must give certification
+# details.").
+_OFFER_VERB = re.compile(r"\b(?:offer|offers|provide|provides|include|includes)\b")
+# Scheduling/logistics nouns (B5-N1): when a requirement predicate is
+# directly followed by one of these, it modifies THAT noun, not the growth
+# term ("required start date" is about the start date). A narrow set on
+# purpose: a broad noun list would break compound requirements ("Must have
+# experience and certification" — "experience" is a real requirement
+# object, not a scheduling noun).
+_SCHEDULING_NOUN = frozenset({
+    "start", "date", "time", "deadline", "shift", "schedule",
+    "location", "interview", "application",
+})
+# Imperative instruction verbs (B5-N3): a sentence starting with one of
+# these (optionally after "please") is an instruction to the applicant
+# ("Include certification in your application."), not offered growth.
+# Base forms only — the participles are noun modifiers ("offered
+# training" IS offered growth).
+_IMPERATIVE_VERB = re.compile(r"^\s*(?:please\s+)?(?:offer|include|provide)\s*$")
 # Years are extracted only when framed as a requirement for the candidate
 # (B-G2-02): a requirement anchor before the number, a "+" minimum marker,
 # or required/preferred right after. Employer-history boilerplate
@@ -166,30 +189,64 @@ def _skills_factor(evaluation: Evaluation, weights: dict) -> FitFactor:
     return _factor("skills", raw, evidence, weights)
 
 
-def _concept_present(text: str, name: str, pattern) -> bool:
+def _predicate_attaches(text: str) -> bool:
+    """True when a requirement predicate in `text` attaches to the growth
+    term. A predicate directly followed by a scheduling noun modifies THAT
+    noun, not the term (B5-N1: 'required start date' is about the start
+    date). A comma/period/end or any other following word means it
+    attaches (the predicate governs the term or a list ending in it)."""
+    for m in _REQUIREMENT_PREDICATE.finditer(text):
+        rest = text[m.end():]
+        nxt = re.match(r"\s*([a-z]+)", rest)
+        if nxt is None or nxt.group(1) not in _SCHEDULING_NOUN:
+            return True
+    return False
+
+
+def _concept_present(text: str, name: str, pattern, title: str = "") -> bool:
     """True when a growth concept appears as offered growth, not as a
     requirement. Training/certification are guarded on BOTH sides of the
     term within the sentence (B2-R1). The before-search covers the FULL
     preceding sentence fragment (B3-R1: a 30-char window cuts off anchors
     before a cert list), but it is offer-aware (B4-R2): the search stops
     after an offer/provide/include verb, so an anchor in an earlier clause
-    cannot suppress a term a later clause explicitly offers. The
-    after-search is 30 chars, sentence-bounded: predicate anchors may
-    reach across commas (B4-R1: "Training, required for all new hires"),
-    while "minimum" only counts within the term's own clause (B3-N2:
-    "minimum starting pay" must not suppress offered training)."""
+    cannot suppress a term a later clause explicitly offers. Two guards
+    on that truncation (B5): a must-governed offer verb is a requirement,
+    not an offer ("You must provide certification details." — the
+    truncation must not discard the "must"), and a participle is an
+    adjective, not an offer verb (B5-N2). A sentence starting with an
+    imperative offer/include/provide verb is an instruction, not offered
+    growth (B5-N3: "Include certification in your application.") — the
+    posting title is stripped from the fragment first, since the text is
+    "title + details" and the title is not part of the sentence's
+    grammar. The after-search is 30 chars, sentence-bounded: predicate
+    anchors may reach across commas (B4-R1: "Training, required for all
+    new hires"), while "minimum" only counts within the term's own clause
+    (B3-N2: "minimum starting pay" must not suppress offered training). A
+    predicate directly followed by a scheduling noun does not attach to
+    the term (B5-N1: "required start date")."""
     for match in pattern.finditer(text):
         if name in _GUARDED_GROWTH_CONCEPTS:
             before = re.split(r"[.;!?]", text[:match.start()])[-1]
-            offer_matches = list(_OFFER_VERB.finditer(before))
+            fragment = before
+            if title:
+                title_folded = title.casefold()
+                if fragment.startswith(title_folded):
+                    fragment = fragment[len(title_folded):]
+            if _IMPERATIVE_VERB.match(fragment):
+                continue
+            offer_matches = [
+                m for m in _OFFER_VERB.finditer(before)
+                if not re.search(r"\bmust\s+(?:also|always|still|really|just)?\s*$", before[:m.start()])
+            ]
             if offer_matches:
                 before = before[offer_matches[-1].end():]
-            if _REQUIREMENT_PREDICATE.search(before):
+            if _predicate_attaches(before):
                 continue
             if _REQUIREMENT_MINIMUM.search(before.rsplit(",", 1)[-1]):
                 continue
             after = re.split(r"[.;!?]", text[match.end():match.end() + 30])[0]
-            if _REQUIREMENT_PREDICATE.search(after):
+            if _predicate_attaches(after):
                 continue
             if _REQUIREMENT_MINIMUM.search(after.split(",", 1)[0]):
                 continue
@@ -199,7 +256,7 @@ def _concept_present(text: str, name: str, pattern) -> bool:
 
 def _growth_factor(evaluation: Evaluation, weights: dict) -> FitFactor:
     text = f"{evaluation.posting.title} {evaluation.posting.details}".casefold()
-    hits = sorted({name for name, rx in _GROWTH_CONCEPTS if _concept_present(text, name, rx)})
+    hits = sorted({name for name, rx in _GROWTH_CONCEPTS if _concept_present(text, name, rx, title=evaluation.posting.title)})
     raw = min(1.0, len(hits) / 2.0)
     evidence = (
         f"growth signals: {', '.join(hits)}" if hits
