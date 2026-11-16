@@ -8,7 +8,8 @@ FR2-G2-03 negated nationwide scope, FR2-G2-04 conditional approvals).
 
 Synthetic postings only. Defect cases fail on pristine 0d16559 and pass after
 the targeted fix; guardrail cases lock preserved policy semantics (189 prior
-tests untouched, incl. Hermes 40, 7 controls, 22 probes and the A09 lock).
+tests untouched, incl. Hermes 40, 7 controls, 22 probes (A09 resolved by
+Kyle's Nov 16, 2026 decision: remote across the US is eligible).
 Cases marked "already covered" pass on the baseline via the legacy prefix
 pattern and must keep passing with unchanged evidence.
 """

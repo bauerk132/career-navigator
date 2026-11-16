@@ -8,7 +8,10 @@ confident out-of-area rejection. Missing salary goes to Needs Review (Kyle
 2026-11-15); the value stays unknown. Bounded pay ranges straddling the floor
 go to Needs Review (Kyle 2026-11-15). Remote geography follows explicit
 Pennsylvania evidence: open => pass, excludes => exclude, unclear/unstated =>
-review; nationwide US scope includes Pennsylvania. Geographic "only" phrases
+review; nationwide US scope includes Pennsylvania. Scope-spread phrases
+("across the US/USA", "throughout the US") count as nationwide scope (A09,
+Kyle decision 2026-11-16: remote across the US is eligible, not review).
+Geographic "only" phrases
 must be genuinely geographic; incidental state mentions never restrict.
 Explicit PA applicant exclusions (cannot employ / rejects / residents cannot
 apply) beat nationwide or PA remote text. Labeled or soft geographic
@@ -96,8 +99,13 @@ _NATIONWIDE = re.compile(
 )
 # Full-text fallback: pronoun "us only" ("contact us only by email") is not
 # nationwide scope. Genuine "US only" clauses are captured as regions instead.
+# Scope-spread phrases ("across the US/USA", "throughout the US", "anywhere
+# in the US") ARE nationwide scope: Kyle decision 2026-11-16 (A09) — remote
+# across the US is eligible, not review. The preposition keeps pronoun "us"
+# out, and incidental "in the US" mentions are deliberately not matched.
 _NATIONWIDE_TEXT = re.compile(
     r"\b(?:united states|nationwide|any (?:us )?state|all (?:50 )?states)\b|\bu\.s\."
+    r"|\b(?:across|throughout|anywhere in|everywhere in)\s+(?:the\s+)?(?:us|usa|u\.s\.)\b"
 )
 _US_STATE_NAMES = frozenset({
     "alabama", "alaska", "arizona", "arkansas", "california", "colorado",

@@ -14,10 +14,10 @@ Corpus provenance (synthetic postings only):
 - ANTIGRAVITY_PROBES: the 22 adversarial probes from Antigravity's Fix Round 1
   review (reviews/career-navigator/fix-round-1-qoder-4330052-review.md §3.2).
   Pay shorthand "$30/hr" transcribed to the parser's "$30 an hour" wording.
-  Probe A09 is a documented discrepancy: the review table claims eligible,
-  but pristine 4330052 returns review ("Remote across the US" is not consumed
-  by the nationwide grammar). Locked at observed baseline behavior below and
-  flagged for the coordinator; not silently expanded in scope.
+  Probe A09 is resolved: the review table claims eligible, and since Kyle's
+  Nov 16, 2026 decision (remote across the US is eligible, not review) the
+  nationwide grammar now consumes "across the US/USA" scope phrases, so A09
+  runs as an ordinary probe expecting eligible. The old review lock is gone.
 - FR2 cases and phrasing variants: handoff §4 acceptance cases plus general
   negation/geographic variants (§5.4). Hermes's untracked experimental tests
   (cn/policy-decisions worktree) were compared read-only for phrasing ideas
@@ -243,18 +243,18 @@ class AntigravityProbeTests(unittest.TestCase):
 
     def test_22_probes(self):
         for cid, loc, details, pay, expected in ANTIGRAVITY_PROBES:
-            if cid == "A09":
-                continue  # documented pre-existing discrepancy; locked below
             with self.subTest(case=cid, location=loc, details=details, pay=pay):
                 decision, _ = decide(loc, details, pay)
                 self.assertEqual(decision.status, expected)
 
-    def test_a09_discrepancy_locked_at_observed_baseline(self):
-        # Review table claims eligible; pristine 4330052 returns review because
-        # "Remote across the US" is not consumed by the nationwide grammar.
-        # Pre-existing, out of FR2 scope; flagged for coordinator decision.
-        decision, _ = decide("Remote", "Our company was founded in California. Remote across the US.")
-        self.assertEqual(decision.status, "review")
+    def test_a09_remote_across_us_is_eligible(self):
+        # Kyle decision Nov 16, 2026 (A09): "remote across the US" is
+        # nationwide scope and eligible, not review. The review table always
+        # claimed eligible; the grammar now consumes the scope phrase.
+        decision, result = decide("Remote", "Our company was founded in California. Remote across the US.")
+        self.assertEqual(decision.status, "eligible")
+        self.assertEqual(location_reason(decision).outcome, "pass")
+        self.assertEqual(result.priority, "high")
 
 
 class FR201ExplicitPAExclusionTests(unittest.TestCase):

@@ -6,8 +6,8 @@ the real pipeline on these postings and assert the contract output matches.
 
 Cases: eligible, missing-pay -> review, PA-excluded, driving -> excluded,
 Philadelphia included, remote-PA-unknown -> review, pay-straddle -> review,
-A09 remote-across-US -> review (locked baseline: nationwide-ish wording
-without Pennsylvania evidence is review, never eligible).
+A09 remote-across-US -> eligible (Kyle decision Nov 16, 2026: remote across
+the US/USA is nationwide scope and good for jobs, not review).
 """
 from dataclasses import dataclass
 
@@ -103,15 +103,15 @@ GOLDEN_EXAMPLES: tuple[GoldenExample, ...] = (
         note="Bounded range straddles the $19/hr floor (low below, high above) -> review.",
     ),
     GoldenExample(
-        name="a09-remote-across-us-review",
+        name="a09-remote-across-us",
         posting=_posting(
             "https://www.indeed.com/viewjob?jk=GOLD8",
             "Remote Support Analyst", "Keystone Support", "Remote",
             "Remote across the US.", "$22 an hour",
         ),
-        expected_classification="Needs Review",
-        note="A09 locked baseline: 'Remote across the US' states no Pennsylvania "
-        "evidence -> Needs Review, never eligible.",
+        expected_classification="Strong Fit",
+        note="A09, Kyle decision Nov 16, 2026: 'Remote across the US' is "
+        "nationwide scope and eligible, not review.",
     ),
 )
 

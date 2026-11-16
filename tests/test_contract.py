@@ -75,13 +75,16 @@ class GoldenExampleTests(unittest.TestCase):
                     f"{example.name}: {example.note}",
                 )
 
-    def test_a09_remote_across_us_is_review_not_eligible(self):
-        example = next(e for e in GOLDEN_EXAMPLES if e.name == "a09-remote-across-us-review")
+    def test_a09_remote_across_us_is_eligible(self):
+        # Kyle decision Nov 16, 2026 (A09): remote across the US is
+        # nationwide scope and eligible, not review.
+        example = next(e for e in GOLDEN_EXAMPLES if e.name == "a09-remote-across-us")
         contract = _contract_for(example.posting)
-        self.assertEqual(contract.decision_status, "review")
+        self.assertEqual(contract.classification, "Strong Fit")
+        self.assertEqual(contract.decision_status, "eligible")
         location = next(r for r in contract.reasons if r["factor"] == "location")
-        self.assertEqual(location["outcome"], "review")
-        self.assertTrue(contract.unknowns.remote_pa)
+        self.assertEqual(location["outcome"], "pass")
+        self.assertFalse(contract.unknowns.remote_pa)
 
     def test_missing_pay_sets_pay_unknown_and_vs_current_unknown(self):
         example = next(e for e in GOLDEN_EXAMPLES if e.name == "missing-pay-review")
