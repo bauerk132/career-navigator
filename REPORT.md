@@ -192,15 +192,75 @@
   both tolerate up to two adverbs between "must" and the verb; the gap is
   capped at two words so a distant "must" cannot reach across a clause
   (S5 "Must have 2 years of experience and we offer paid training."
-  stays growth 0.50). Known limitation (documented, not fixed): a
-  progressive -ing form inside a requirement ("Must have experience
-  providing training.") now truncates the anchor and counts as growth —
-  no matrix probe covers the requirement-side gerund; the prescribed fix
-  restores the -ing forms to the truncation set. 6 new regression tests
-  (95 ranking tests total): X1–X6.
+  stays growth 0.50). Known limitation (documented, not fixed — example
+  CORRECTED in Fix Round B7, see below): a progressive -ing form inside
+  a requirement truncates the anchor and counts as growth. The example
+  given here ("Must have experience providing training.") does NOT
+  reproduce — it scores growth 0.00, fit 70.00 at both 2811395 and
+  5121d2b, because the 2-word must-guard already covers "have
+  experience". The sentence that actually reproduces it is "We require
+  3 years of experience providing training." (growth 0.50, fit 75.00;
+  correct 0.00/60.00). 6 new regression tests (95 ranking tests total):
+  X1–X6.
 - **Verification after Fix Round B6:** 346/346 tests, demo byte-identical,
   corpus 40/40, controls 7/7, live uvicorn smoke 9 shortlist / 5 review /
   5 excluded / 19 total, 19 unique job ids, detail parity 19/19.
+- **Fix Round B7** — Qoder's B6 re-review verdict was NO-GO at 5121d2b
+  (hof_01M7S0BD7D9SWS8PXP, Nov 19, 04:17:02Z; G1 PASS, G2 3 NEW Majors).
+  Antigravity said GO (hof_01M7RZJM52MVS3MFRJ, Nov 19, 04:03Z; G1 PASS,
+  G2 ACCEPT), but the NO-GO closes the merge gate — 5121d2b does not
+  merge. All B5 fixes were verified and every B6 claim was reproduced
+  independently. Kyle ordered Fix Round B7 (Nov 19). B7-R1 (G2-B6-01):
+  "including" as an unconditional offer verb truncated requirement-list
+  anchors — "We require 3 years of experience, including certification."
+  scored growth 0.50 (fit 75.00 Strong Fit; correct 0.00/60.00
+  Realistic), and "Bachelor's degree required. We require experience,
+  including certification." likewise flipped. Fix: "including" is a
+  list-continuation marker — it takes the governance of the nearest
+  preceding anchor in the fragment, so a requirement-governed
+  "including" extends the requirement scope to the rest of the sentence
+  fragment (including a later "and are providing training" clause);
+  an offer-governed "including" still counts ("We offer training,
+  including certification." stays growth 1.00). A must-governed offer
+  verb ("You must provide training, including certification.") counts as
+  a requirement anchor, not a free offer. B7-R2 (G2-B6-02): the
+  imperative guard's finite-verb lookahead only checked the immediate
+  next word, so an intervening adverb turned a noun-subject offer into
+  a false imperative — "Offer now includes training." scored growth 0.00
+  (fit 70.00; correct 0.50/85.00), and "We require 3 years of
+  experience. Offer now includes training." flipped to 0.00/60.00
+  Realistic (correct 0.50/75.00 Strong Fit). Fix: a finite verb form
+  (offers/provides/includes, plus past-tense offered/provided/included)
+  ANYWHERE in the remainder means the verb is a noun subject instead.
+  B7-R3 (G2-B6-03): a requirement-side progressive gerund counted as
+  growth when the must->verb gap exceeded the 2-word [a-z]-only window —
+  "Must have 3 years of experience providing training." scored growth
+  0.50 (fit 85.00; correct 0.00/70.00), and with a degree requirement it
+  flipped to 75.00 Strong Fit (correct 0.00/60.00 Realistic). Fix: for
+  -ing forms only, "must have" governs across a longer,
+  digit-containing requirement tail, but not across a new clause
+  ("Must have 2 years of experience and are providing training." stays
+  growth 0.50, X4/X5 preserved); base forms keep the short gap so S5
+  ("Must have 2 years of experience and we offer paid training.") stays
+  growth 0.50. Masking note (Qoder): "We require 3 years of experience,
+  including certification. Offer now includes training." nets 0.50/75.00
+  at both SHAs — B7-R1 and B7-R2 cancel out — so the masking-case
+  regression asserts the growth evidence string ("growth signals:
+  training") rather than the net score. Known limitation (documented,
+  not fixed): a require/requires-governed gerund still truncates the
+  anchor and counts as growth — "We require 3 years of experience
+  providing training." scores growth 0.50 (fit 75.00; correct 0.00/
+  60.00); B7-R3 covers only the "must have" form. Out of scope
+  (Qoder observations, pre-existing at parent, not B7 gates): O1 modal
+  periphrasis ("must be able to provide", "must be willing to provide",
+  3 adverbs); O2 noun "Requirements:" not a predicate anchor; O3
+  reviewer-host environment quirks. 14 new regression tests (109
+  ranking tests total): B7-R1 x4, B7-R2 x5, B7-R3 x2, lock-ins x3.
+- **Verification after Fix Round B7:** 360/360 tests, demo byte-identical,
+  corpus 40/40 (gq 18 / ir 16 / nc 6), controls 7/7, live uvicorn smoke
+  9 shortlist / 5 review / 5 excluded / 19 total, 19 unique job ids,
+  detail parity 19/19, /api/stats consistent. Verified on Python 3.12.3
+  (venv); Python 3.15.2 was not available in the verification VM.
 
 ## 1. Location and baseline
 

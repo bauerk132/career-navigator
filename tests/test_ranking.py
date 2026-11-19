@@ -620,6 +620,114 @@ class FixRoundBTests(unittest.TestCase):
         self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
         self.assertEqual(ranked(p).fit_score, 70.00)
 
+    # Fix Round B7 — Qoder's B6 re-review verdict (hof_01M7S0BD7D9SWS8PXP,
+    # NO-GO at 5121d2b): 3 NEW class-flipping Majors. Antigravity said GO
+    # (hof_01M7RZJM52MVS3MFRJ, G1 PASS, G2 ACCEPT), but the NO-GO closes
+    # the merge gate. All B5 fixes were verified and every B6 claim
+    # reproduced independently.
+    # B7-R1: "including" as an unconditional offer verb truncated
+    # requirement-list anchors, so a certification listed as a
+    # requirement counted as offered growth.
+    def test_require_experience_including_certification_is_not_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="We require 3 years of experience, including certification.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(ranked(p).fit_score, 60.00)
+        self.assertEqual(ranked(p).final_classification, "Realistic")
+
+    def test_degree_required_plus_require_experience_including_certification_is_realistic(self):
+        p = posting(title="Network Support Technician",
+                    details="Bachelor's degree required. We require experience, including certification.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(ranked(p).fit_score, 60.00)
+        self.assertEqual(ranked(p).final_classification, "Realistic")
+
+    def test_must_have_experience_including_certification_is_not_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Candidates must have experience, including certification.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(ranked(p).fit_score, 70.00)
+
+    def test_require_experience_including_certification_and_are_providing_training_is_not_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="We require experience, including certification, and are providing training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(ranked(p).fit_score, 70.00)
+
+    # B7-R2: the imperative guard's finite-verb lookahead only checked the
+    # immediate next word, so an intervening adverb turned a noun-subject
+    # offer into a false "imperative" and suppressed genuine growth.
+    def test_offer_now_includes_training_is_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Offer now includes training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+        self.assertEqual(ranked(p).fit_score, 85.00)
+
+    def test_require_experience_offer_now_includes_training_is_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="We require 3 years of experience. Offer now includes training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+        self.assertEqual(ranked(p).fit_score, 75.00)
+        self.assertEqual(ranked(p).final_classification, "Strong Fit")
+
+    def test_offer_now_includes_training_plus_degree_required_is_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Offer now includes training. Bachelor's degree required.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+        self.assertEqual(ranked(p).fit_score, 75.00)
+
+    def test_offer_actually_provides_training_is_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Offer actually provides training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+        self.assertEqual(ranked(p).fit_score, 85.00)
+
+    def test_offer_provided_training_is_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Offer provided training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+        self.assertEqual(ranked(p).fit_score, 85.00)
+
+    # B7-R3: a requirement-side progressive gerund counted as growth when
+    # the must->verb gap exceeded the 2-word [a-z]-only window.
+    def test_must_have_experience_providing_training_is_not_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Must have 3 years of experience providing training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(ranked(p).fit_score, 70.00)
+
+    def test_degree_required_plus_must_have_experience_providing_training_is_realistic(self):
+        p = posting(title="Network Support Technician",
+                    details="Bachelor's degree required. Must have 3 years of experience providing training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(ranked(p).fit_score, 60.00)
+        self.assertEqual(ranked(p).final_classification, "Realistic")
+
+    # B7 lock-ins: "including" still counts when it continues an offer
+    # list; a requirement-governed "including" and a noun-subject offer
+    # in the same posting must be scored per concept (the masking case
+    # nets 0.5/75 at both SHAs, so the evidence string is the check);
+    # "must have ... and are providing" stays an offer (clause break).
+    def test_offer_training_including_certification_is_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="We offer training, including certification.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 1.0)
+        self.assertEqual(ranked(p).fit_score, 100.00)
+
+    def test_masking_case_scores_per_concept(self):
+        p = posting(title="Network Support Technician",
+                    details="We require 3 years of experience, including certification. Offer now includes training.")
+        growth = factor(ranked(p), "career_growth")
+        self.assertEqual(growth.raw, 0.5)
+        self.assertEqual(growth.evidence, "growth signals: training")
+        self.assertEqual(ranked(p).fit_score, 75.00)
+
+    def test_must_have_experience_and_are_providing_training_is_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Must have 2 years of experience and are providing training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+        self.assertEqual(ranked(p).fit_score, 85.00)
+
     # B-G1-01: fit weights are Policy-configurable with validation.
     def test_default_policy_weights_are_the_blueprint(self):
         self.assertEqual(Policy().fit_weights, FIT_WEIGHTS)

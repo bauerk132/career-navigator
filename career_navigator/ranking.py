@@ -90,7 +90,21 @@ _REQUIREMENT_MINIMUM = re.compile(r"\bminimum\b")
 # requirement — the truncation must not discard the "must have"). "give"
 # is deliberately NOT an offer verb — it also appears in requirements
 # ("You must give certification details.").
+# "including" is a list-continuation marker, not an independent offer
+# (B7-R1): when it extends a requirement list ("We require 3 years of
+# experience, including certification."), the requirement scope covers the
+# rest of the sentence fragment — see _requirement_governed_including.
+# It still counts as an offer verb when it continues an offer list
+# ("We offer training, including certification.").
 _OFFER_VERB = re.compile(r"\b(?:offer|offers|provide|provides|include|includes|providing|offering|including)\b")
+# Progressive -ing offer forms (B7-R3): "must have" governs these across a
+# longer, digit-containing requirement tail.
+_OFFER_ING = frozenset({"providing", "offering", "including"})
+# Clause break that ends "must have" governance of an -ing form (B7-R3):
+# a conjunction plus a finite auxiliary or pronoun starts a new clause
+# ("and are providing", "and we offer"), so the -ing form is a fresh
+# offer, not the requirement's gerund.
+_CLAUSE_BREAK = re.compile(r"\band\s+(?:are|is|was|were|we|they|you|he|she|it|our|their)\b")
 # Scheduling/logistics nouns (B5-N1): when a requirement predicate is
 # directly followed by one of these, it modifies THAT noun, not the growth
 # term ("required start date" is about the start date). A narrow set on
@@ -109,10 +123,19 @@ _SCHEDULING_NOUN = frozenset({
 # (B6-R2): a determiner, adjective, or noun between the verb and the term
 # ("Include your certification in your application." / "Provide relevant
 # certification details at interview.") is still an instruction — the B5
-# rule's bare-verb adjacency missed it. A following finite verb form
-# (offers/provides/includes) means the verb is a noun subject instead
-# ("Offer includes training." IS offered growth — A9 lock-in).
-_IMPERATIVE_VERB = re.compile(r"^\s*(?:please\s+)?(?:offer|include|provide)(?:\s+(?!(?:offers|provides|includes)\b)\S+(?:\s+\S+)*)?\s*$")
+# rule's bare-verb adjacency missed it. A finite verb form ANYWHERE in
+# the remainder means the verb is a noun subject instead (B7-R2): the
+# B6 guard only checked the immediate next word, so an intervening
+# adverb turned a noun-subject offer into a false imperative ("Offer now
+# includes training." IS offered growth — the adverb sits between the
+# subject and its finite verb). Past-tense finite forms (offered/
+# provided/included) count too ("Offer provided training." is an offer,
+# not an instruction).
+_IMPERATIVE_VERB = re.compile(
+    r"^\s*(?:please\s+)?(?:offer|include|provide)\b"
+    r"(?![\s\S]*\b(?:offers|provides|includes|offered|provided|included)\b)"
+    r"(?:\s+\S+)*\s*$"
+)
 # Years are extracted only when framed as a requirement for the candidate
 # (B-G2-02): a requirement anchor before the number, a "+" minimum marker,
 # or required/preferred right after. Employer-history boilerplate
@@ -204,6 +227,53 @@ def _skills_factor(evaluation: Evaluation, weights: dict) -> FitFactor:
     return _factor("skills", raw, evidence, weights)
 
 
+def _must_governed_offer(prefix: str, verb: str) -> bool:
+    """True when an offer verb at the end of `prefix` is governed by
+    "must", so it is a requirement, not an offer (B5-N4/B6-N1/B7-R3).
+    Direct must+verb ("You must quickly provide certification details.")
+    is governed for any verb. For -ing forms only, "must have" also
+    governs across a longer, digit-containing requirement tail ("Must
+    have 3 years of experience providing training.") — but not across a
+    new clause ("... and are providing training." stays an offer, X4/X5).
+    Base forms keep the short gap on purpose: "Must have 2 years of
+    experience and we offer paid training." (S5) must stay offered."""
+    if re.search(r"\bmust\s+(?:[a-z]+\s+){0,2}$", prefix):
+        return True
+    if verb in _OFFER_ING:
+        m = re.search(r"\bmust\s+have\b", prefix)
+        if m is not None:
+            tail = prefix[m.end():]
+            if ";" not in tail and not _CLAUSE_BREAK.search(tail):
+                return True
+    return False
+
+
+def _requirement_governed_including(before: str) -> bool:
+    """True when `before` contains an "including" that extends a
+    requirement list (B7-R1). "including" is a list-continuation marker:
+    it takes the governance of the nearest preceding anchor in the
+    fragment — a requirement predicate ("We require 3 years of
+    experience, including certification.") or a free offer verb ("We
+    offer training, including certification."). A must-governed offer
+    verb ("You must provide training, including certification.") is
+    itself a requirement anchor, not a free offer. When the "including"
+    is requirement-governed, the requirement scope covers the rest of
+    the sentence fragment, so a later term in the same fragment is a
+    requirement item too ("... including certification, and are
+    providing training.")."""
+    for m in re.finditer(r"\bincluding\b", before):
+        head = before[:m.start()]
+        req = list(_REQUIREMENT_PREDICATE.finditer(head))
+        off = [
+            o for o in _OFFER_VERB.finditer(head)
+            if o.group(0) != "including"
+            and not _must_governed_offer(head[:o.start()], o.group(0))
+        ]
+        if req and (not off or req[-1].start() > off[-1].start()):
+            return True
+    return False
+
+
 def _predicate_attaches(text: str) -> bool:
     """True when a requirement predicate in `text` attaches to the growth
     term. A predicate directly followed by a scheduling noun modifies THAT
@@ -231,12 +301,19 @@ def _concept_present(text: str, name: str, pattern, title: str = "") -> bool:
     truncation must not discard the "must"), and a participle is an
     adjective, not an offer verb (B5-N2). The must-governed guard
     tolerates up to two adverbs between "must" and the verb (B6-N1:
-    "You must quickly provide certification details."). A sentence
+    "You must quickly provide certification details."). For -ing forms
+    only, "must have" also governs across a longer, digit-containing
+    requirement tail (B7-R3: "Must have 3 years of experience providing
+    training."), but not across a new clause. A requirement-governed
+    "including" extends the requirement scope to the rest of the
+    sentence fragment (B7-R1). A sentence
     starting with an imperative offer/include/provide verb is an
     instruction, not offered growth (B5-N3: "Include certification in
     your application.") — the posting title is stripped from the fragment
     first, since the text is "title + details" and the title is not part
-    of the sentence's grammar. The after-search is 30 chars,
+    of the sentence's grammar. The imperative guard looks for a finite
+    verb form anywhere in the remainder (B7-R2: "Offer now includes
+    training." is a noun subject, not an instruction). The after-search is 30 chars,
     sentence-bounded: predicate anchors may reach across commas (B4-R1:
     "Training, required for all new hires"), while "minimum" only counts
     within the term's own clause (B3-N2: "minimum starting pay" must not
@@ -253,9 +330,11 @@ def _concept_present(text: str, name: str, pattern, title: str = "") -> bool:
                     fragment = fragment[len(title_folded):]
             if _IMPERATIVE_VERB.match(fragment):
                 continue
+            if _requirement_governed_including(fragment):
+                continue
             offer_matches = [
                 m for m in _OFFER_VERB.finditer(before)
-                if not re.search(r"\bmust\s+(?:[a-z]+\s+){0,2}$", before[:m.start()])
+                if not _must_governed_offer(before[:m.start()], m.group(0))
             ]
             if offer_matches:
                 before = before[offer_matches[-1].end():]
