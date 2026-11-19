@@ -350,6 +350,98 @@
   tests/test_ranking.py (+206/-3), REPORT.md, and test-output.txt
   changed. Verified on Python 3.12.3 (venv); Python 3.15.2 was not
   available in the verification VM.
+- **Fix Round B9** — Qoder's B8 re-review verdict was NO-GO at 81d1a7b
+  (hof_01M7SXH1Z0D6KHQ87K, Nov 19, 12:46:56Z; G1 PASS, G2 1 Major:
+  G2-B8-01, a closed-adverb-list regression introduced by B8-R2, plus
+  two non-gating observations O-B8-1/O-B8-2 recommended for the same
+  surgical round). Antigravity said GO
+  (hof_01M7SWRV1EJYBV5TRZ, Nov 19, 12:33:42Z; G1 PASS, G2 ACCEPT), but
+  the NO-GO closes the merge gate — 81d1a7b does not merge. All 16 B8
+  probe values and every verification claim were reproduced
+  independently on both runtimes (3.12.10 and 3.15.2). Kyle ordered Fix
+  Round B9 with the full scope (Nov 19): the G2-B8-01 adverb fix PLUS
+  O-B8-1 and O-B8-2. B9-R1 (G2-B8-01): the B8 noun-subject gap was a
+  closed 28-word adverb/auxiliary list, so any adverb outside it fell
+  back to imperative and suppressed a genuine noun-subject offer —
+  "Offer actively provides training." was growth 0.50 at B7, 0.00 at
+  B8, and with a degree requirement it flipped to 0.00/60.00 Realistic
+  (correct 0.50/75.00 Strong Fit); "Offer soon provides training."
+  likewise (0.00/70.00 at B8, correct 0.50/85.00). Fix: the gap is now
+  PRODUCTIVE for -ly adverbs — any -ly word counts as an adverb —
+  instead of a closed list; no whack-a-mole appending ("actively" and
+  "soon" are covered by the rule, not by list entries). A small
+  blocklist of -ly nouns ("family", "supply", "ally", "bully", "folly",
+  "jelly", "rally", "belly", "volley", "valley", "gully", "dolly",
+  "holly", "lily") keeps those from counting as adverbs: "Offer family
+  provides training." stays growth 0.00. The closed list survives only
+  for the common non-ly adverbs ("now", "soon" — added with B9-R1 —
+  "actually", "also", ...) and the auxiliaries. Per-concept regression
+  tests for N4/N4d/N4e plus both imperative lock-ins ("Include the
+  provided certification." and "Offer certification that includes
+  training." stay growth 0.00). Side effect, now fixed rather than
+  merely documented: the B8 limitation "Offer gleefully provides
+  training." (growth 0.00) now scores 0.50/85.00, and "Offer only
+  provides training." likewise (0.00 at B8, 0.50/85.00 now). B9-R3
+  (O-B8-1): "mandatory" was in _REQUIREMENT_PREDICATE but missing from
+  the -ing anchor list — the duplicated anchor lists had diverged — so
+  "Mandatory: 3 years of experience providing training." counted as
+  growth (0.50/85.00 at B8; 0.50/75.00 Strong Fit with a degree,
+  correct 0.00/60.00 Realistic). Fix: one token — "mandatory" added to
+  _ING_GOVERNING_ANCHOR, with the same clause-break protection, so
+  "Mandatory: 3 years of experience providing training and are
+  offering certification." scores growth 0.50 with evidence "growth
+  signals: certification" (training suppressed, certification still
+  offered). Note the fit there is 85.00, not 75.00 as in the "We
+  require" S18 twin: the years after "mandatory" are not extracted
+  (the years grammar lists requires?/required/minimum/at least/
+  preferred, not "mandatory" — pre-existing), so the requirements
+  factor scores 1.00; the per-concept behavior is what the test pins.
+  B9-R2 (O-B8-2): the B8 noun-subject finite list had no modal+base
+  form, so "Offer will provide training." fell back to imperative
+  (growth 0.00 at B8, correct 0.50/85.00; 0.00/60.00 Realistic with a
+  degree, correct 0.50/75.00 Strong Fit). Fix: the main-verb slot now
+  accepts a modal auxiliary (will/would/can/could/shall/should/may/
+  might/must) followed by a base offer verb (offer/provide/include),
+  with an optional gap token between them ("Offer will quickly provide
+  training." scores 0.50/85.00). "Offer can provide training." and
+  "Offer should include training." likewise score 0.50/85.00. Known
+  behavior, documented not hidden: "Offer must provide training."
+  still scores growth 0.00 — the modal slot exempts the imperative,
+  but the requirement predicate ("must provide") then attaches to the
+  term downstream, so it is suppressed as a requirement (the same
+  B5-N4 rule that makes "You must provide certification details." a
+  requirement). S18 ruling (from Qoder's B8 verdict): Qoder confirmed
+  Muse's 0.50/75.00 for S18 is correct and its own B7 0.50/85.00 was
+  its arithmetic error (it used the no-years other-factor sum); the
+  REPORT.md arithmetic note was accurate. Known limitations
+  (documented, not fixed): the years grammar does not extract years
+  after "mandatory" (see B9-R3 note above); a modal+adverb+base form
+  with TWO gap tokens between modal and base ("Offer will very quickly
+  provide training.") is not covered — the modal slot takes at most
+  one gap token; "Offer gleefully provides training." is fixed, but
+  any future closed-list-style gap would need the same productive
+  treatment. Out of scope (Qoder observations, pre-existing at parent,
+  not B9 gates): O1 modal periphrasis ("must be able to provide");
+  O2 noun "Requirements:" not a predicate anchor; O3 reviewer-host
+  environment quirks. One handoff transcription nit from B8, corrected
+  here: the B8 handoff listed R2-3 as 0.50/85.00, but R2-3 ("Offer now
+  includes training. Bachelor's degree required.") is 0.50/75.00 at
+  both parent and B8 — behavior unchanged and correct; only the
+  handoff value was mislabeled. 15 new regression tests (149 ranking
+  tests total): B9-R1 x7, B9-R3 x3, B9-R2 x5.
+- **Verification after Fix Round B9:** 400/400 tests, demo byte-identical,
+  corpus 40/40 (gq 18 / ir 16 / nc 6), controls 7/7, live uvicorn smoke
+  9 shortlist / 5 review / 5 excluded / 19 total, 19 unique job ids,
+  detail parity 19/19, /api/stats consistent (thresholds 70/45).
+  All 24 probe sentences (9 B9 targets + 15 lock-ins/edges) match
+  expected values through the real pipeline. contracts.py verified
+  byte-identical to remote staging (SHA-256
+  ded4f7eb2f8600a49def2a7d0a966e5f5c0aac5fdffbf8b6e570849fae4d26ec);
+  policy.py, app.py, eligibility.py, demo.py, __main__.py, pipeline.py,
+  demo-output.txt likewise identical — only ranking.py (+60/-25 vs
+  81d1a7b), tests/test_ranking.py (+114/-0), REPORT.md, and
+  test-output.txt changed. Verified on Python 3.12.3 (venv); Python
+  3.15.2 was not available in the verification VM.
 
 ## 1. Location and baseline
 

@@ -931,6 +931,120 @@ class FixRoundBTests(unittest.TestCase):
         self.assertEqual(growth.evidence, "growth signals: certification")
         self.assertEqual(ranked(p).fit_score, 75.00)
 
+    # B9-R1: the B8 noun-subject gap was a closed 28-word adverb list, so
+    # any adverb outside it fell back to imperative — "Offer actively
+    # provides training." was growth 0.50 at B7, 0.00 at B8 (G2-B8-01).
+    # The gap is now productive for -ly adverbs, with a small blocklist
+    # of -ly nouns ("family", "supply", ...) that must not count.
+    def test_offer_actively_provides_training_is_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Offer actively provides training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+        self.assertEqual(ranked(p).fit_score, 85.00)
+
+    def test_degree_required_plus_offer_actively_provides_training_is_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Bachelor's degree required. Offer actively provides training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+        self.assertEqual(ranked(p).fit_score, 75.00)
+        self.assertEqual(ranked(p).final_classification, "Strong Fit")
+
+    def test_offer_soon_provides_training_is_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Offer soon provides training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+        self.assertEqual(ranked(p).fit_score, 85.00)
+
+    def test_offer_gleefully_provides_training_is_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Offer gleefully provides training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+        self.assertEqual(ranked(p).fit_score, 85.00)
+
+    def test_offer_only_provides_training_is_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Offer only provides training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+        self.assertEqual(ranked(p).fit_score, 85.00)
+
+    def test_offer_family_provides_training_is_not_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Offer family provides training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(ranked(p).fit_score, 70.00)
+
+    def test_offer_certification_that_includes_training_is_not_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Offer certification that includes training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(ranked(p).fit_score, 70.00)
+
+    # B9-R3: "mandatory" was in _REQUIREMENT_PREDICATE but missing from
+    # the -ing anchor list, so a mandatory-governed gerund counted as
+    # growth (O-B8-1). It now governs like require/requires/required/
+    # preferred, with the same clause-break protection.
+    def test_mandatory_experience_providing_training_is_not_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Mandatory: 3 years of experience providing training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(ranked(p).fit_score, 70.00)
+
+    def test_degree_required_plus_mandatory_experience_providing_training_is_realistic(self):
+        p = posting(title="Network Support Technician",
+                    details="Bachelor's degree required. Mandatory: 3 years of experience providing training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(ranked(p).fit_score, 60.00)
+        self.assertEqual(ranked(p).final_classification, "Realistic")
+
+    def test_mandatory_experience_providing_training_and_are_offering_certification_is_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Mandatory: 3 years of experience providing training and are offering certification.")
+        growth = factor(ranked(p), "career_growth")
+        self.assertEqual(growth.raw, 0.5)
+        self.assertEqual(growth.evidence, "growth signals: certification")
+        # Fit 85.00, not 75.00: the years after "mandatory" are not
+        # extracted (the years grammar lists requires?/required/minimum/
+        # at least/preferred, not "mandatory" — pre-existing), so the
+        # requirements factor scores 1.00 here, unlike the "We require"
+        # S18 twin at 75.00. The per-concept behavior is what this test
+        # pins: training suppressed, certification counted.
+        self.assertEqual(ranked(p).fit_score, 85.00)
+
+    # B9-R2: the B8 noun-subject finite list had no modal+base form, so
+    # "Offer will provide training." fell back to imperative (O-B8-2).
+    # A modal auxiliary in the gap followed by a base offer verb now
+    # counts as the main-verb slot.
+    def test_offer_will_provide_training_is_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Offer will provide training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+        self.assertEqual(ranked(p).fit_score, 85.00)
+
+    def test_degree_required_plus_offer_will_provide_training_is_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Bachelor's degree required. Offer will provide training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+        self.assertEqual(ranked(p).fit_score, 75.00)
+        self.assertEqual(ranked(p).final_classification, "Strong Fit")
+
+    def test_offer_can_provide_training_is_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Offer can provide training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+        self.assertEqual(ranked(p).fit_score, 85.00)
+
+    def test_offer_should_include_training_is_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Offer should include training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+        self.assertEqual(ranked(p).fit_score, 85.00)
+
+    def test_offer_will_quickly_provide_training_is_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Offer will quickly provide training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+        self.assertEqual(ranked(p).fit_score, 85.00)
+
     # B-G1-01: fit weights are Policy-configurable with validation.
     def test_default_policy_weights_are_the_blueprint(self):
         self.assertEqual(Policy().fit_weights, FIT_WEIGHTS)

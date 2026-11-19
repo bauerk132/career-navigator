@@ -97,7 +97,7 @@ _REQUIREMENT_MINIMUM = re.compile(r"\bminimum\b")
 # It still counts as an offer verb when it continues an offer list
 # ("We offer training, including certification.").
 _OFFER_VERB = re.compile(r"\b(?:offer|offers|provide|provides|include|includes|providing|offering|including)\b")
-# Progressive -ing offer forms (B7-R3/B8-R3): a requirement anchor
+# Progressive -ing offer forms (B7-R3/B8-R3/B9-R3): a requirement anchor
 # governs these across a longer, digit-containing requirement tail.
 _OFFER_ING = frozenset({"providing", "offering", "including"})
 # Clause break that ends "must have" governance of an -ing form (B7-R3):
@@ -136,11 +136,11 @@ _SCHEDULING_NOUN = frozenset({
 # ("Include your certification in your application." / "Provide relevant
 # certification details at interview.") is still an instruction — the B5
 # rule's bare-verb adjacency missed it. A sentence with a noun-subject
-# reading is NOT an instruction (B7-R2/B8-R2): "Offer" as a head noun
-# followed (after adverbs/auxiliaries) by a finite verb form ("Offer now
-# includes training.", "Offer provided training.") is an offer, not an
-# instruction. The finite form must be the sentence's main verb: a
-# participle after a determiner ("Include the provided certification.")
+# reading is NOT an instruction (B7-R2/B8-R2/B9-R1/B9-R2): "Offer" as a
+# head noun followed (after adverbs/auxiliaries) by a finite verb form
+# ("Offer now includes training.", "Offer provided training.") is an
+# offer, not an instruction. The finite form must be the sentence's main
+# verb: a participle after a determiner ("Include the provided certification.")
 # is an adjective, and a finite verb inside a relative clause ("Include
 # your certification that includes training.") belongs to the clause,
 # not the sentence — neither exempts the imperative. Only "offer" can
@@ -151,20 +151,47 @@ _IMPERATIVE_VERB = re.compile(
     r"^\s*(?:please\s+)?(?:offer|include|provide)\b(?:\s+\S+)*\s*$"
 )
 # Words that may sit between a noun-subject "Offer" and its finite verb
-# (B8-R2): adverbs and auxiliaries — never a determiner, possessive, or
-# pronoun, so "the provided certification" stays adjectival.
+# (B8-R2/B9-R1): adverbs and auxiliaries — never a determiner, possessive, or
+# pronoun, so "the provided certification" stays adjectival. The adverb
+# slot is PRODUCTIVE for -ly adverbs (B9-R1): B8's closed 28-word list
+# fell back to imperative for any adverb outside it ("Offer actively
+# provides training." was growth 0.50 at B7, 0.00 at B8 — G2-B8-01; "Offer
+# soon provides training." likewise), so any -ly word counts as an adverb
+# here. A small blocklist of -ly NOUNS ("family", "supply", ...) keeps
+# those from counting: a following finite verb makes the noun reading
+# nonsensical, but the blocklist is belt-and-suspenders. The closed list
+# survives only for the common non-ly adverbs ("now", "soon", ...) and
+# the auxiliaries. "soon" was added with B9-R1 (it is not an -ly word,
+# and "Offer soon provides training." is ordinary posting grammar).
+_NOUN_SUBJECT_LY_NOUN = frozenset({
+    "family", "supply", "ally", "bully", "folly", "jelly", "rally",
+    "belly", "volley", "valley", "gully", "dolly", "holly", "lily",
+})
 _NOUN_SUBJECT_GAP = (
-    r"(?:now|actually|also|always|still|really|just|quickly|typically"
+    r"(?:(?!(?:" + "|".join(sorted(_NOUN_SUBJECT_LY_NOUN)) + r")\b)[a-z]+ly"
+    r"|now|actually|also|always|still|really|just|quickly|typically"
     r"|currently|often|usually|generally|already|even|daily|regularly"
     r"|consistently|proudly|happily|certainly|definitely|finally"
-    r"|recently|normally|frequently|occasionally|sometimes"
+    r"|recently|normally|frequently|occasionally|sometimes|soon"
     r"|has|have|had|will|would|can|could|shall|should|may|might|must"
     r"|been|be|being)"
 )
+# Modal auxiliaries that may precede a base offer verb in the
+# noun-subject main-verb slot (B9-R2): "Offer will provide training."
+# is an offer, not an instruction — the B8 finite list had no
+# modal+base form, so it fell back to imperative (growth 0.00).
+# A modal may also be followed by one gap token ("Offer will quickly
+# provide training."). "must" is in the list per the review, but
+# "Offer must provide training." is still suppressed downstream: the
+# requirement predicate ("must provide") attaches to the term, so the
+# exemption alone does not score it as growth.
+_NOUN_SUBJECT_MODAL = r"(?:will|would|can|could|shall|should|may|might|must)"
 _NOUN_SUBJECT_OFFER = re.compile(
     r"^\s*offer\b"
     r"(?:\s+" + _NOUN_SUBJECT_GAP + r"){0,2}"
-    r"\s+(?:offers|provides|includes|offered|provided|included)\b"
+    r"\s+(?:offers|provides|includes|offered|provided|included"
+    r"|" + _NOUN_SUBJECT_MODAL + r"(?:\s+" + _NOUN_SUBJECT_GAP + r")?"
+    r"\s+(?:offer|provide|include))\b"
 )
 # Years are extracted only when framed as a requirement for the candidate
 # (B-G2-02): a requirement anchor before the number, a "+" minimum marker,
@@ -258,26 +285,30 @@ def _skills_factor(evaluation: Evaluation, weights: dict) -> FitFactor:
 
 
 # Requirement anchors that govern an -ing offer form across a
-# requirement tail (B7-R3/B8-R3): "must have" plus require/requires/
-# required/preferred. The tail check (no semicolon, no clause break) is
-# the same for all of them.
-_ING_GOVERNING_ANCHOR = re.compile(r"\b(?:must\s+have|requires?|required|preferred)\b")
+# requirement tail (B7-R3/B8-R3/B9-R3): "must have" plus require/requires/
+# required/preferred, and "mandatory" (B9-R3: _REQUIREMENT_PREDICATE
+# already included it, but this list omitted it — the duplicated anchor
+# lists had diverged, so "Mandatory: 3 years of experience providing
+# training." counted as growth). The tail check (no semicolon, no clause
+# break) is the same for all of them.
+_ING_GOVERNING_ANCHOR = re.compile(r"\b(?:must\s+have|requires?|required|preferred|mandatory)\b")
 
 
 def _requirement_governed_offer(prefix: str, verb: str) -> bool:
     """True when an offer verb at the end of `prefix` is governed by a
     requirement anchor, so it is a requirement, not an offer
-    (B5-N4/B6-N1/B7-R3/B8-R3). Direct must+verb ("You must quickly
+    (B5-N4/B6-N1/B7-R3/B8-R3/B9-R3). Direct must+verb ("You must quickly
     provide certification details.") is governed for any verb. For -ing
     forms only, a requirement anchor also governs across a longer,
     digit-containing requirement tail ("Must have 3 years of experience
     providing training."; B8-R3 extends this to require/requires/
     required/preferred: "We require 3 years of experience providing
-    training." is a requirement too) — but not across a new clause
-    ("... and are providing training." stays an offer, X4/X5) or a
-    semicolon. Base forms keep the short gap on purpose: "Must have 2
-    years of experience and we offer paid training." (S5) must stay
-    offered."""
+    training." is a requirement too; B9-R3 adds "mandatory": "Mandatory:
+    3 years of experience providing training." is a requirement too) —
+    but not across a new clause ("... and are providing training." stays
+    an offer, X4/X5) or a semicolon. Base forms keep the short gap on
+    purpose: "Must have 2 years of experience and we offer paid
+    training." (S5) must stay offered."""
     if re.search(r"\bmust\s+(?:[a-z]+\s+){0,2}$", prefix):
         return True
     if verb in _OFFER_ING:
@@ -347,9 +378,10 @@ def _concept_present(text: str, name: str, pattern, title: str = "") -> bool:
     tolerates up to two adverbs between "must" and the verb (B6-N1:
     "You must quickly provide certification details."). For -ing forms
     only, a requirement anchor also governs across a longer,
-    digit-containing requirement tail (B7-R3/B8-R3: "Must have 3 years
+    digit-containing requirement tail (B7-R3/B8-R3/B9-R3: "Must have 3 years
     of experience providing training."; B8-R3 extends the same
-    governance to require/requires/required/preferred), but not across
+    governance to require/requires/required/preferred; B9-R3 adds
+    "mandatory"), but not across
     a new clause. A requirement-governed "including" extends the
     requirement scope to the rest of the sentence fragment — but only
     up to a coordinated VP (B8-R1: "and are providing" starts a fresh
@@ -358,8 +390,11 @@ def _concept_present(text: str, name: str, pattern, title: str = "") -> bool:
     certification in your application.") — the posting title is stripped
     from the fragment first, since the text is "title + details" and the
     title is not part of the sentence's grammar. The imperative guard
-    exempts a noun-subject reading (B8-R2: "Offer now includes
-    training." is a noun subject, not an instruction); a participle
+    exempts a noun-subject reading (B8-R2/B9-R1/B9-R2: "Offer now includes
+    training." is a noun subject, not an instruction); the noun-subject
+    gap is productive for -ly adverbs (B9-R1: "Offer actively provides
+    training."), and the main-verb slot accepts a modal auxiliary plus a
+    base offer verb (B9-R2: "Offer will provide training."); a participle
     after a determiner and a finite verb inside a relative clause do
     not exempt it. The after-search is 30 chars,
     sentence-bounded: predicate anchors may reach across commas (B4-R1:
