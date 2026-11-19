@@ -571,6 +571,55 @@ class FixRoundBTests(unittest.TestCase):
         p = posting(details="Offer includes training.")
         self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
 
+    # Fix Round B6 — Qoder's B5 re-review verdict (hof_01M7JEJXNRDZQVVY1Q,
+    # NO-GO at 2811395): 2 Majors + 1 nit. Antigravity said GO
+    # (hof_01M7JE5GT65304V0MV), but the NO-GO closes the merge gate.
+    # B6-R1: the B5-N2 fix dropped progressive -ing offer forms along with
+    # the -ed participles, so genuinely offered growth in progressive
+    # tense was suppressed by an earlier requirement anchor.
+    def test_require_experience_and_are_providing_training_is_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="We require 3 years of experience and are providing training.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+        self.assertEqual(ranked(p).fit_score, 75.00)
+        self.assertEqual(ranked(p).final_classification, "Strong Fit")
+
+    def test_require_experience_and_are_offering_certification_is_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="We require experience and are offering certification.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.5)
+        self.assertEqual(ranked(p).fit_score, 85.00)
+
+    # B6-R2: the B5-N3 imperative fix required bare-verb adjacency, so a
+    # determiner/adjective between the verb and the term defeated it on
+    # standard posting phrasing.
+    def test_include_your_certification_in_application_is_not_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Include your certification in your application.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(ranked(p).fit_score, 70.00)
+
+    def test_degree_required_plus_include_your_certification_is_realistic(self):
+        p = posting(title="Network Support Technician",
+                    details="Bachelor's degree required. Include your certification in your application.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(ranked(p).fit_score, 60.00)
+        self.assertEqual(ranked(p).final_classification, "Realistic")
+
+    def test_provide_relevant_certification_details_is_not_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="Provide relevant certification details at interview.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(ranked(p).fit_score, 70.00)
+
+    # B6-N1: the must-governed offer-verb skip tolerated only a fixed
+    # adverb list, so "must quickly provide" counted as an offer.
+    def test_must_quickly_provide_certification_details_is_not_growth(self):
+        p = posting(title="Network Support Technician",
+                    details="You must quickly provide certification details.")
+        self.assertEqual(factor(ranked(p), "career_growth").raw, 0.0)
+        self.assertEqual(ranked(p).fit_score, 70.00)
+
     # B-G1-01: fit weights are Policy-configurable with validation.
     def test_default_policy_weights_are_the_blueprint(self):
         self.assertEqual(Policy().fit_weights, FIT_WEIGHTS)

@@ -71,17 +71,26 @@ _GUARDED_GROWTH_CONCEPTS = frozenset({"training", "certification"})
 # "You must give certification details." is a requirement, not growth) —
 # but NOT "must have" in the must-verb list: "must have" is already its
 # own anchor, and the B4-R2 offer clause ("Must have 2 years of experience
-# and we offer paid training.") must stay offerable.
-_REQUIREMENT_PREDICATE = re.compile(r"\b(?:required|must have|requires?|mandatory|preferred|must\s+(?:give|provide|include|hold|submit|present|show|complete|possess|maintain|obtain|offer))\b")
+# and we offer paid training.") must stay offerable. The must+verb pattern
+# tolerates up to two adverbs between "must" and the verb (B6-N1: "You
+# must quickly provide certification details." is a requirement, not
+# growth). The gap is capped at two words so a distant "must" cannot reach
+# across a clause ("Must have 2 years of experience and we offer paid
+# training." must stay offerable).
+_REQUIREMENT_PREDICATE = re.compile(r"\b(?:required|must have|requires?|mandatory|preferred|must\s+(?:[a-z]+\s+){0,2}(?:give|provide|include|hold|submit|present|show|complete|possess|maintain|obtain|offer))\b")
 _REQUIREMENT_MINIMUM = re.compile(r"\bminimum\b")
-# Offer verbs for the B4-R2 truncation: BASE forms only (B5-N2). A
-# participle (offered/provided/included) immediately before the term's
-# noun phrase is an adjective, not an offer verb ("Must have certification
-# from our offered training program." is a requirement — the truncation
-# must not discard the "must have"). "give" is deliberately NOT an offer
-# verb — it also appears in requirements ("You must give certification
-# details.").
-_OFFER_VERB = re.compile(r"\b(?:offer|offers|provide|provides|include|includes)\b")
+# Offer verbs for the B4-R2 truncation: BASE forms plus progressive -ing
+# forms (B6-R1). B5-N2 correctly excluded the -ed participles, but it also
+# dropped the progressives, so an earlier requirement anchor suppressed
+# genuinely offered growth stated in progressive tense ("We require 3 years
+# of experience and are providing training." is offered growth, not a
+# requirement). A participle (offered/provided/included) immediately
+# before the term's noun phrase is still an adjective, not an offer verb
+# ("Must have certification from our offered training program." is a
+# requirement — the truncation must not discard the "must have"). "give"
+# is deliberately NOT an offer verb — it also appears in requirements
+# ("You must give certification details.").
+_OFFER_VERB = re.compile(r"\b(?:offer|offers|provide|provides|include|includes|providing|offering|including)\b")
 # Scheduling/logistics nouns (B5-N1): when a requirement predicate is
 # directly followed by one of these, it modifies THAT noun, not the growth
 # term ("required start date" is about the start date). A narrow set on
@@ -96,8 +105,14 @@ _SCHEDULING_NOUN = frozenset({
 # these (optionally after "please") is an instruction to the applicant
 # ("Include certification in your application."), not offered growth.
 # Base forms only — the participles are noun modifiers ("offered
-# training" IS offered growth).
-_IMPERATIVE_VERB = re.compile(r"^\s*(?:please\s+)?(?:offer|include|provide)\s*$")
+# training" IS offered growth). The verb may be followed by its object
+# (B6-R2): a determiner, adjective, or noun between the verb and the term
+# ("Include your certification in your application." / "Provide relevant
+# certification details at interview.") is still an instruction — the B5
+# rule's bare-verb adjacency missed it. A following finite verb form
+# (offers/provides/includes) means the verb is a noun subject instead
+# ("Offer includes training." IS offered growth — A9 lock-in).
+_IMPERATIVE_VERB = re.compile(r"^\s*(?:please\s+)?(?:offer|include|provide)(?:\s+(?!(?:offers|provides|includes)\b)\S+(?:\s+\S+)*)?\s*$")
 # Years are extracted only when framed as a requirement for the candidate
 # (B-G2-02): a requirement anchor before the number, a "+" minimum marker,
 # or required/preferred right after. Employer-history boilerplate
@@ -214,17 +229,20 @@ def _concept_present(text: str, name: str, pattern, title: str = "") -> bool:
     on that truncation (B5): a must-governed offer verb is a requirement,
     not an offer ("You must provide certification details." — the
     truncation must not discard the "must"), and a participle is an
-    adjective, not an offer verb (B5-N2). A sentence starting with an
-    imperative offer/include/provide verb is an instruction, not offered
-    growth (B5-N3: "Include certification in your application.") — the
-    posting title is stripped from the fragment first, since the text is
-    "title + details" and the title is not part of the sentence's
-    grammar. The after-search is 30 chars, sentence-bounded: predicate
-    anchors may reach across commas (B4-R1: "Training, required for all
-    new hires"), while "minimum" only counts within the term's own clause
-    (B3-N2: "minimum starting pay" must not suppress offered training). A
-    predicate directly followed by a scheduling noun does not attach to
-    the term (B5-N1: "required start date")."""
+    adjective, not an offer verb (B5-N2). The must-governed guard
+    tolerates up to two adverbs between "must" and the verb (B6-N1:
+    "You must quickly provide certification details."). A sentence
+    starting with an imperative offer/include/provide verb is an
+    instruction, not offered growth (B5-N3: "Include certification in
+    your application.") — the posting title is stripped from the fragment
+    first, since the text is "title + details" and the title is not part
+    of the sentence's grammar. The after-search is 30 chars,
+    sentence-bounded: predicate anchors may reach across commas (B4-R1:
+    "Training, required for all new hires"), while "minimum" only counts
+    within the term's own clause (B3-N2: "minimum starting pay" must not
+    suppress offered training). A predicate directly followed by a
+    scheduling noun does not attach to the term (B5-N1: "required start
+    date")."""
     for match in pattern.finditer(text):
         if name in _GUARDED_GROWTH_CONCEPTS:
             before = re.split(r"[.;!?]", text[:match.start()])[-1]
@@ -237,7 +255,7 @@ def _concept_present(text: str, name: str, pattern, title: str = "") -> bool:
                 continue
             offer_matches = [
                 m for m in _OFFER_VERB.finditer(before)
-                if not re.search(r"\bmust\s+(?:also|always|still|really|just)?\s*$", before[:m.start()])
+                if not re.search(r"\bmust\s+(?:[a-z]+\s+){0,2}$", before[:m.start()])
             ]
             if offer_matches:
                 before = before[offer_matches[-1].end():]

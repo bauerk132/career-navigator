@@ -158,6 +158,49 @@
   corpus 40/40, controls 7/7, live uvicorn smoke 9 shortlist / 5 review /
   5 excluded / 19 total, 19 unique job ids, detail parity 19/19, no
   deprecation warnings.
+- **Fix Round B6** — Qoder's B5 re-review verdict was NO-GO at 2811395
+  (hof_01M7JEJXNRDZQVVY1Q, Nov 16, 10:11 AM EST; G1 PASS, G2 2 Majors).
+  Antigravity said GO (hof_01M7JE5GT65304V0MV, Nov 16, 10:03 AM EST), but
+  the NO-GO closes the merge gate — 2811395 does not merge. Kyle chose
+  "do fix round B6" (Nov 18). B6-R1 (NEW class-flipping regression): the
+  B5-N2 fix dropped progressive -ing offer forms along with the -ed
+  participles, so an earlier requirement anchor suppressed genuinely
+  offered growth in progressive tense — "We require 3 years of experience
+  and are providing training." scored growth 0.00 (fit 60.00 Realistic;
+  correct 75.00 Strong Fit), and "We require experience and are offering
+  certification." scored 70.00 (correct 85.00). Fix: restore
+  providing|offering|including to the `_OFFER_VERB` truncation set while
+  keeping -ed participles (offered/provided/included) excluded, so A7/A8
+  ("Must have certification from our offered training program.") stay
+  growth 0.00. B6-R2 (incomplete fix of B5-N3): the imperative rule
+  required bare-verb adjacency, so a determiner/adjective between the verb
+  and the term defeated it on standard phrasing — "Include your
+  certification in your application." scored growth 0.50 (fit 85.00;
+  correct 70.00), and with a degree requirement "Bachelor's degree
+  required. Include your certification in your application." flipped to
+  75.00 Strong Fit (correct 60.00 Realistic); "Provide relevant
+  certification details at interview." scored 85.00 (correct 70.00). Fix:
+  an imperative offer/include/provide verb at sentence start (optionally
+  after "please") followed by its object — determiner, adjective, or noun
+  — is an instruction, not offered growth; a following finite verb form
+  (offers/provides/includes) means the verb is a noun subject instead, so
+  A9 ("Offer includes training.") stays growth 0.50. B6-N1: the
+  must-governed offer-verb skip tolerated only a fixed adverb list
+  (also/always/still/really/just), so "You must quickly provide
+  certification details." counted as an offer (growth 0.50, fit 85.00;
+  correct 70.00). Fix: the must-governed skip and the must+verb predicate
+  both tolerate up to two adverbs between "must" and the verb; the gap is
+  capped at two words so a distant "must" cannot reach across a clause
+  (S5 "Must have 2 years of experience and we offer paid training."
+  stays growth 0.50). Known limitation (documented, not fixed): a
+  progressive -ing form inside a requirement ("Must have experience
+  providing training.") now truncates the anchor and counts as growth —
+  no matrix probe covers the requirement-side gerund; the prescribed fix
+  restores the -ing forms to the truncation set. 6 new regression tests
+  (95 ranking tests total): X1–X6.
+- **Verification after Fix Round B6:** 346/346 tests, demo byte-identical,
+  corpus 40/40, controls 7/7, live uvicorn smoke 9 shortlist / 5 review /
+  5 excluded / 19 total, 19 unique job ids, detail parity 19/19.
 
 ## 1. Location and baseline
 
