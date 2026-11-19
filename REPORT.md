@@ -261,6 +261,95 @@
   9 shortlist / 5 review / 5 excluded / 19 total, 19 unique job ids,
   detail parity 19/19, /api/stats consistent. Verified on Python 3.12.3
   (venv); Python 3.15.2 was not available in the verification VM.
+- **Fix Round B8** — Qoder's B7 re-review verdict was NO-GO at 2ed0c02
+  (hof_01M7STZ65QXC27P63C, Nov 19, 12:02:13Z; G1 PASS, G2 3 Majors: two
+  NEW class-flipping regressions introduced by B7's own fixes, plus the
+  disclosed require-gerund residual). Antigravity said GO
+  (hof_01M7STZ167GPP5DMAB, Nov 19, 12:02:08Z; G1 PASS, G2 ACCEPT), but
+  the NO-GO closes the merge gate — 2ed0c02 does not merge. All 11 B7
+  probes and every verification claim were reproduced independently on
+  both runtimes. Kyle ordered Fix Round B8 with ALL THREE fixes (Nov 19).
+  B8-R1 (G2-B7-01): the requirement-governed "including" scope bled
+  across clause breaks and suppressed genuinely offered growth — "We
+  require experience, including certification, and are providing
+  training." scored growth 0.00 (fit 70.00; correct 0.50/85.00), and
+  with a degree requirement it flipped to 0.00/60.00 Realistic (correct
+  0.50/75.00 Strong Fit). Fix: the including-governance is now bound to
+  the list's own clause — a coordinated VP ("and are providing", "and
+  we provide", "and offer") starts a fresh governance domain, so the
+  term after it is offered growth. A plain noun continuation is NOT a
+  break ("We require experience, including certification and training."
+  stays growth 0.00; likewise "... including certification, and
+  training."). Per-concept regression tests assert the growth evidence
+  string ("growth signals: training") for S1/S19/T4, not just net
+  scores. B8-R2 (G2-B7-02): the B7-R2 finite-verb-ANYWHERE exemption
+  misread instructions containing participial adjectives or
+  relative-clause finite verbs as noun-subject offers — "Include the
+  provided certification." went from growth 0.00 (B6) to 0.50/85.00
+  (B7, false growth), and with a degree requirement it flipped to
+  0.50/75.00 Strong Fit (correct 0.00/60.00 Realistic); "Include your
+  certification that includes training." likewise counted training via
+  the relative-clause "includes". Fix: the exemption now requires a
+  noun-subject reading — "Offer" as a head noun followed (after up to
+  two adverbs/auxiliaries) by a finite verb form ("Offer now includes
+  training.", "Offer actually provides training.", "Offer provided
+  training." all stay growth 0.50; "Offer has provided training." and
+  "Offer quickly provides training." likewise). A participle after a
+  determiner ("Include the provided certification.", "Please provide
+  the included certification.", "Include the offered training.") is
+  adjectival, and a finite verb inside a relative clause ("Include
+  your certification that includes training.", "Include your training
+  that provides certification.") belongs to the clause — neither
+  exempts the imperative. Only "offer" can be the head noun:
+  "include"/"provide" as sentence subjects are not posting grammar.
+  "Include copies of any certification provided." stays growth 0.00
+  (the participle sits after the term). B8-R3 (G2-B7-03, the disclosed
+  residual): require/requires/required/preferred-governed gerunds still
+  truncated the anchor and counted as growth — "We require 3 years of
+  experience providing training." scored growth 0.50 (fit 75.00;
+  correct 0.00/60.00), and with a degree requirement it flipped to
+  0.50/75.00 Strong Fit (correct 0.00/60.00 Realistic); "Requires ..."
+  and "Preferred: ..." likewise. Fix: the B7-R3 governance is extended
+  from "must have" to require/requires/required/preferred anchors for
+  -ing forms, with the SAME clause-break protection — "We require 3
+  years of experience providing training and are offering
+  certification." now scores growth 0.50 with evidence "growth
+  signals: certification" (training suppressed, certification still
+  offered); the "Preferred: ..." and semicolon variants likewise.
+  Base forms keep the short gap, so S5 and X4/X5 stay offered. One
+  B7 test expectation was corrected, not just added: the B7 R1-4 test
+  asserted growth 0.00/70.00 for "We require experience, including
+  certification, and are providing training." — that value was the
+  G2-B7-01 defect itself; it now asserts growth 0.50/85.00. Verdict
+  arithmetic note: Qoder's stated correct value for S18 is 0.50/85.00,
+  but that is inconsistent with its own B7 value of 1.00/90.00 — the
+  growth-weight drop from 1.00 to 0.50 is 15 points (30% x 0.50), so
+  the correct fit is 75.00, verified here (skills 30 + growth 15 +
+  requirements 10 + commute 10 + comp 10); the per-concept behavior is
+  exactly as specified. Known limitations (documented, not fixed):
+  a "mandatory"-governed gerund is not covered (B8-R3 anchors are must
+  have/require/requires/required/preferred only); "Offer will provide
+  training." scores growth 0.00 (base-form "provide" after "will" is
+  not a listed finite form — same as B7, pre-existing); the
+  noun-subject gap is a closed adverb/auxiliary list, so an adverb
+  outside it would fall back to imperative. Out of scope (Qoder
+  observations, pre-existing at parent, not B8 gates): O1 modal
+  periphrasis; O2 noun "Requirements:" not a predicate anchor; O3
+  reviewer-host environment quirks. 25 new regression tests (134
+  ranking tests total): B8-R1 x7, B8-R2 x10, B8-R3 x8.
+- **Verification after Fix Round B8:** 385/385 tests, demo byte-identical,
+  corpus 40/40 (gq 18 / ir 16 / nc 6), controls 7/7, live uvicorn smoke
+  9 shortlist / 5 review / 5 excluded / 19 total, 19 unique job ids,
+  detail parity 19/19, /api/stats consistent (thresholds 70/45).
+  All 37 probe sentences (16 B8 targets + 21 lock-ins) match expected
+  values through the real pipeline. contracts.py verified byte-identical
+  to remote staging (SHA-256
+  ded4f7eb2f8600a49def2a7d0a966e5f5c0aac5fdffbf8b6e570849fae4d26ec);
+  policy.py, app.py, eligibility.py, demo.py, __main__.py, pipeline.py
+  likewise identical — only ranking.py (+101/-53 vs 2ed0c02),
+  tests/test_ranking.py (+206/-3), REPORT.md, and test-output.txt
+  changed. Verified on Python 3.12.3 (venv); Python 3.15.2 was not
+  available in the verification VM.
 
 ## 1. Location and baseline
 
