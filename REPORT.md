@@ -644,3 +644,13 @@ git diff --check                                                        # clean
 - Soft-phrase guard requires a strong geographic token; unknown foreign names in soft phrases (not labeled fields) are not consumed. Labeled-field values are always consumed; unknown values → review (conservative).
 - `_RESTRICTION` anchors and incidental-subject heuristic unchanged from Round 1; G2-04 remote-city expansion still deferred.
 - Release gate: G1 then distinct independent G2 (must include the 40-case corpus) required; Qoder cannot self-approve. No merge/push/deploy/UI integration until coordinator AND Kyle explicitly approve.
+
+## Live adapter (scaffolding)
+
+Phase 2 V1 adds a separate, read-only JobFinder SQLite loader in `career_navigator/live_adapter.py`. It checks `user_version` and the exact audited `jobs` column set, maps explicit named columns, retains upstream fields as provenance, and records CN-derived URL identity, pay facts, eligibility assessment, and visible dedup groups. Import health includes source runs, `state.last_updated`, and `MAX(jobs.last_seen)`; the scaffold reports timestamps without imposing a freshness threshold. Synthetic tests build temporary schema-identical databases and tracker CSV fixtures and verify SHA-256 checksums remain unchanged.
+
+This work does not wire the adapter into the pipeline or API, persist to a Career Navigator database, read or write the tracker CSV, mirror to Notion, or run against live data. Those remain separate gates after review.
+
+Fix-round note (D1): `career_navigator/dedup.py:85-86` changes duplicate-group labeling only. Baseline bug: every uncertain edge is unioned, so the old global check labeled EVERY multi-member group `uncertain` whenever any uncertain edge existed anywhere in the input, including pure-exact groups. The fixed code checks per-bucket root membership, so only groups actually containing an ambiguous edge are `uncertain`. Group memberships, ordering, and visibility are unchanged (non-lossy, A2/JF-44), and the synthetic demo output is byte-identical. The change is required by `test_exact_and_uncertain_duplicates_coexist_without_contamination`, which fails on the baseline dedup.
+
+EGM rounds (orchestrator record): Round 1 audit findings — 10 auto-accepted by Kyle, all verified landed in independent re-review; contested Findings 6 (unbounded `fetchall`) and 7 (SSRF) skipped per Kyle; Finding 12 (`ImportedRow` dict hashing) declined. Re-audit GO. Independent post-fix G1/G2 re-review: G1 PASS, G2 ACCEPT, 0 blocker / 0 major (431 tests on Python 3.12.10 and 3.15.2; 34/34 adversarial probes).

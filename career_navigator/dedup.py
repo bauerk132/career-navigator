@@ -82,8 +82,8 @@ def group_duplicates(postings) -> tuple[DuplicateGroup, ...]:
         if len(members) == 1:
             groups.append(DuplicateGroup(members, "single", ""))
             continue
-        roots = {find(i) for i, _ in uncertain_edges}
-        used_uncertain = any(find(i) in roots and find(j) in roots for i, j in uncertain_edges)
+        bucket_root = find(indices[0])
+        used_uncertain = bucket_root in {find(i) for i, _ in uncertain_edges}
         if used_uncertain:
             groups.append(
                 DuplicateGroup(members, "uncertain", "ambiguous identity match; kept visible for review")

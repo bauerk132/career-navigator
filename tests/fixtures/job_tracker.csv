@@ -1,0 +1,2 @@
+job_id,date_found,assigned_agent,category,title,company,location,work_type,pay,linkedin_url,apply_url,apply_platform,description_summary,key_requirements,fit_notes,resume_file,cover_letter_file,status,date_applied,confirmation_number,heard_back,heard_back_date,response_type,next_step,follow_up_date,notes,last_updated_by,last_updated
+SYN-001,2026-01-01,synthetic,office_it,Sample Support Technician,Example Co,Pittsburgh PA,onsite,$20/hour,,,,synthetic fixture only,,,,,Ready,,,,,,,,,synthetic,2026-01-01
