@@ -15,9 +15,11 @@ from urllib.parse import urlsplit
 
 from .dedup import group_duplicates
 from .eligibility import evaluate
-from .models import Posting
+from .models import Decision, Posting, Reason
 from .pay import parse_pay
+from .pipeline import Evaluation
 from .policy import Policy
+from .relevance import score
 from .text import clean_text
 from .urls import canonical_url
 
@@ -68,6 +70,15 @@ class ImportedRow:
     upstream_records: dict
     duplicate_confidence: str
     duplicate_reason: str
+    # Group metadata retained at load time (F-04): exact_duplicate_count is
+    # the number of raw rows this row represents in the served presentation —
+    # len(group.members) for the representative of an exact group, 1 for
+    # singles and uncertains, 0 for non-representative exact siblings.
+    # is_representative is False only for non-representative exact siblings;
+    # the bridge serves exactly the representative rows. Summed over all
+    # imported rows, exact_duplicate_count equals the raw row count.
+    exact_duplicate_count: int = 1
+    is_representative: bool = True
 
 
 @dataclass(frozen=True)
@@ -315,12 +326,121 @@ def load_live_database(path: str | Path, policy: Policy | None = None) -> LiveIm
         }
         raw_rows.append((posting, upstream))
     groups = group_duplicates(posting for posting, _ in raw_rows)
-    duplicate_info = {
-        member: (group.confidence, group.reason)
-        for group in groups for member in group.members
-    }
+    upstream_by_posting = {posting: upstream for posting, upstream in raw_rows}
+    group_info: dict[Posting, tuple[str, str, int, bool]] = {}
+    for group in groups:
+        if group.confidence == "exact":
+            representative = min(
+                group.members,
+                key=lambda member: _representative_key(member, upstream_by_posting[member]),
+            )
+            for member in group.members:
+                group_info[member] = (
+                    group.confidence,
+                    group.reason,
+                    len(group.members) if member == representative else 0,
+                    member == representative,
+                )
+        else:
+            for member in group.members:
+                group_info[member] = (group.confidence, group.reason, 1, True)
     imported = tuple(
-        ImportedRow(posting, upstream, *duplicate_info[posting])
+        ImportedRow(posting, upstream, *group_info[posting])
         for posting, upstream in sorted(raw_rows, key=lambda pair: (pair[0].url, pair[1]["id"]))
     )
     return LiveImport(imported, health)
+
+
+def _representative_key(posting: Posting, upstream: dict) -> tuple:
+    """Deterministic exact-group representative tiebreak (F-05), highest
+    precedence first: longest details, then known pay, then lowest
+    JobFinder id. Returned as a sort key for min()."""
+    pay_known = upstream.get("pay_facts", {}).get("status") != "missing"
+    job_id = upstream.get("id")
+    return (
+        -len(posting.details),
+        0 if pay_known else 1,
+        job_id if isinstance(job_id, int) else 0,
+    )
+
+
+def _decision_from_assessment(assessment: dict) -> Decision:
+    """Rebuild the Decision pre-computed by load_live_database from the
+    cn_assessment record (no re-evaluation)."""
+    return Decision(
+        status=assessment["status"],
+        reasons=tuple(
+            Reason(factor, outcome, evidence)
+            for factor, outcome, evidence in assessment["reasons"]
+        ),
+    )
+
+
+def evaluate_live_import(live_import: LiveImport, policy: Policy | None = None) -> tuple[Evaluation, ...]:
+    """Map a live import to pipeline Evaluations for the served presentation.
+
+    Reuses the pre-computed CN assessment stored in each row's
+    upstream_records (evaluate() is never re-run here); relevance is scored
+    fresh against the given policy. Exact-duplicate siblings are folded:
+    only the representative row of each exact group is served, carrying
+    exact_duplicate_count = group size; singles and uncertains are served
+    1:1 with count 1. The complete upstream_records dict (all 21 provenance
+    fields plus cn_assessment) survives intact into each Evaluation, so the
+    result contract keeps jobs.id and every live provenance field.
+    Evaluations are returned in relevance-rank order, mirroring
+    pipeline.evaluate_postings.
+    """
+    active_policy = policy or Policy()
+    evaluations = []
+    for row in live_import.rows:
+        if not row.is_representative:
+            continue
+        upstream = dict(row.upstream_records)
+        upstream["exact_duplicate_count"] = row.exact_duplicate_count
+        # Mirror pipeline.evaluate_postings: the contract's upstream_records
+        # carries the posting's upstream verdict/status alongside the 21
+        # adapter provenance fields, so S2's upstream_verdict resolves.
+        upstream["verdict"] = row.posting.upstream_verdict
+        upstream["status"] = row.posting.upstream_status
+        decision = _decision_from_assessment(row.upstream_records["cn_assessment"])
+        relevance = score(row.posting, decision, active_policy)
+        evaluations.append(
+            Evaluation(
+                posting=row.posting,
+                identity=canonical_url(row.posting.url),
+                decision=decision,
+                relevance=relevance,
+                duplicate_confidence=row.duplicate_confidence,
+                duplicate_reason=row.duplicate_reason,
+                upstream_records=upstream,
+            )
+        )
+    evaluations.sort(
+        key=lambda ev: (-ev.relevance.value, ev.posting.title, ev.posting.company, ev.posting.url)
+    )
+    return tuple(evaluations)
+
+
+def ingestion_summary(live_import: LiveImport) -> dict:
+    """Raw ingestion-tier metrics over ALL imported rows (pre-folding).
+
+    Totals: rows ingested, CN decision distribution, duplicate-confidence
+    distribution, and the upstream-verdict vs CN-decision contingency
+    matrix. Every raw row is counted exactly once.
+    """
+    by_decision = {"eligible": 0, "review": 0, "rejected": 0}
+    by_duplicate = {"single": 0, "exact": 0, "uncertain": 0}
+    matrix: dict[str, dict[str, int]] = {}
+    for row in live_import.rows:
+        status = row.upstream_records["cn_assessment"]["status"]
+        by_decision[status] = by_decision.get(status, 0) + 1
+        by_duplicate[row.duplicate_confidence] = by_duplicate.get(row.duplicate_confidence, 0) + 1
+        verdict = row.posting.upstream_verdict or "unknown"
+        cell = matrix.setdefault(verdict, {"eligible": 0, "review": 0, "rejected": 0})
+        cell[status] = cell.get(status, 0) + 1
+    return {
+        "total": len(live_import.rows),
+        "by_decision": by_decision,
+        "by_duplicate_confidence": by_duplicate,
+        "matrix": matrix,
+    }
