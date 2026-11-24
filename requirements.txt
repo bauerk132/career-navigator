@@ -4,3 +4,6 @@
 fastapi==0.163.1
 uvicorn==0.54.0
 httpx==0.28.1
+# Windows: ZoneInfo("America/New_York") raises ZoneInfoNotFoundError without
+# tzdata (Phase 2 V2 review finding, Antigravity GO WITH FINDINGS Nov 24).
+tzdata
