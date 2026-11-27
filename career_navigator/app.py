@@ -25,13 +25,23 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from typing import Literal
+
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
 
 from . import freshness
 from .adapters import default_source_path, load_postings
 from .contracts import CURRENT_PAY_HOURLY
+from .duplicate_resolutions import (
+    DuplicateResolutions,
+    ResolutionError,
+    ResolutionState,
+    build_served_view,
+    group_lookup,
+)
 from .freshness import parse_eastern
 from .live_adapter import (
     LiveAdapterError,
@@ -42,6 +52,7 @@ from .live_adapter import (
 from .pipeline import evaluate_postings
 from .policy import SALARY_FLOOR_HOURLY, Policy
 from .ranking import RankedResult, rank_evaluations
+from .state_store import StateError, resolve_state_dir
 
 _LOCAL_ORIGINS = (
     "http://localhost:5173",
@@ -102,13 +113,18 @@ def _ranked_result_to_dict(result: RankedResult) -> dict:
         "duplicate_reason": duplicates.get("reason", ""),
         "exact_duplicate_count": upstream.get("exact_duplicate_count", 1),
         "upstream_verdict": upstream.get("verdict"),
+        # Phase 3c WS5: the decision in force for this posting's uncertain
+        # group (keep / merge / dismiss), or None. Raw duplicate_confidence
+        # above is never changed by a decision.
+        "duplicate_resolution": upstream.get("duplicate_resolution"),
     }
 
 
-def _totals(snapshot: dict) -> dict:
+def _totals(snapshot: dict, ranked=None) -> dict:
     # Takes the snapshot bound once by the endpoint (C-N4) so a /api/refresh
     # interleaving mid-request can never mix generations inside one response.
-    ranked = snapshot["ranked"]
+    # ``ranked`` is the served view (decisions applied); default is the raw ranking.
+    ranked = ranked if ranked is not None else snapshot["ranked"]
     return {
         "shortlist": len(ranked.shortlist),
         "review": len(ranked.review),
@@ -125,10 +141,12 @@ def _index(ranked) -> dict:
     }
 
 
-def _exact_duplicate_count_sum(snapshot: dict) -> int:
+def _exact_duplicate_count_sum(snapshot: dict, ranked=None) -> int:
     """Reconciliation invariant (S2): summed over all served postings, the
-    exact_duplicate_count values must equal the raw ingested row count."""
-    ranked = snapshot["ranked"]
+    exact_duplicate_count values must equal the raw ingested row count.
+    Merged duplicates add their folded rows to the kept row's count, so the
+    invariant holds with decisions applied too."""
+    ranked = ranked if ranked is not None else snapshot["ranked"]
     total = 0
     for group in (ranked.shortlist, ranked.review, ranked.excluded):
         for result in group:
@@ -212,6 +230,36 @@ def _reload(app: FastAPI) -> None:
 def _ensure_loaded(app: FastAPI) -> None:
     if app.state.snapshot is None:
         _reload(app)
+
+
+def _served_view(app: FastAPI, snapshot: dict):
+    """The snapshot with Kyle's duplicate decisions applied (Phase 3c WS5).
+
+    The raw snapshot is never modified. The overlay is rebuilt only when the
+    snapshot object or the decisions file changes. A damaged or unreadable
+    decisions file is reported (store.error) and the raw ranking is served,
+    never silently hidden: the dashboard shows the error."""
+    resolutions = app.state.resolutions
+    store = {"enabled": resolutions.enabled, "events": 0, "skipped_lines": 0, "error": None}
+    try:
+        state = resolutions.state()
+    except StateError as exc:
+        store["error"] = str(exc)
+        state = None
+    signature = (state.signature, state.event_count) if state is not None else ("error", store["error"])
+    cached = app.state.view_cache
+    if cached is not None and cached[0] is snapshot and cached[1] == signature:
+        return cached[2]
+    if state is None:
+        state = ResolutionState({}, 0, 0, None)
+    else:
+        store["events"] = state.event_count
+        store["skipped_lines"] = state.skipped
+    view = build_served_view(
+        snapshot["ranked"], state, lambda source: job_id(source), store_info=store,
+    )
+    app.state.view_cache = (snapshot, signature, view)
+    return view
 
 
 def _is_degraded(snapshot: dict) -> bool:
@@ -375,8 +423,40 @@ def _read_gate_summary(reports_dir: str | None) -> dict:
     return {k: v for k, v in summary.items() if k in _GATE_RESPONSE_KEYS}
 
 
+_FINGERPRINT_RE = re.compile(r"^[0-9a-f]{16}$")
+
+
+class DuplicateEventBody(BaseModel):
+    """One write to duplicate_resolutions.jsonl. Only these fields, only
+    these event types; anything else is refused (422)."""
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["resolve", "undo"]
+    action: Literal["keep", "merge", "dismiss"] | None = None
+    kept_jobfinder_id: int | None = None
+    note: str | None = Field(default=None, max_length=500)
+
+
+def _require_local_write(request: Request) -> None:
+    """Guard for every route that writes to the state folder.
+
+    A browser page on another site can reach 127.0.0.1, so a write needs more
+    than being on localhost: the request must be JSON, must carry the custom
+    X-CN-Write header (which forces a CORS preflight that only our local
+    dashboard origins pass), and, when the browser sends an Origin, it must be
+    one of the local dashboard origins."""
+    origin = request.headers.get("origin")
+    if origin is not None and origin not in _LOCAL_ORIGINS:
+        raise HTTPException(status_code=403, detail="request origin is not allowed")
+    if request.headers.get("x-cn-write") != "1":
+        raise HTTPException(status_code=403, detail="missing X-CN-Write header")
+    content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if content_type != "application/json":
+        raise HTTPException(status_code=415, detail="content type must be application/json")
+
+
 def create_app(source_path=None, policy=None, db_path=None,
-               reload_interval=None, task_check=None) -> FastAPI:
+               reload_interval=None, task_check=None, state_dir=None) -> FastAPI:
     """Build the API. Live mode when db_path is given, else when the
     JOBFINDER_DB_PATH env var is set and non-empty; otherwise synthetic
     mode. An explicit db_path wins over the env var.
@@ -385,6 +465,9 @@ def create_app(source_path=None, policy=None, db_path=None,
     0 disables the watcher). Defaults to CN_RELOAD_INTERVAL_SECONDS or 300.
     task_check: callable returning True/False/None for "is the JobFinder
     scheduled task running"; defaults to freshness.task_running.
+    state_dir: folder for Kyle's local decision logs (duplicate_resolutions.jsonl
+    and later workstreams'). Defaults to CN_STATE_DIR, then ~/career-navigator-state
+    in live mode; the synthetic backend has none and cannot write.
     """
     resolved_db = db_path or os.environ.get("JOBFINDER_DB_PATH") or None
     if reload_interval is None:
@@ -435,6 +518,10 @@ def create_app(source_path=None, policy=None, db_path=None,
     app.state.last_auto_reload = None
     app.state.auto_reload_error = None
     app.state.watch_thread = None
+    app.state.resolutions = DuplicateResolutions(
+        resolve_state_dir(state_dir, live=resolved_db is not None)
+    )
+    app.state.view_cache = None
 
     @app.get("/health")
     def health() -> dict:
@@ -467,12 +554,12 @@ def create_app(source_path=None, policy=None, db_path=None,
     def jobs() -> dict:
         _ensure_loaded(app)
         snapshot = app.state.snapshot
-        ranked = snapshot["ranked"]
+        ranked = _served_view(app, snapshot).ranked
         return {
             "shortlist": [_ranked_result_to_dict(r) for r in ranked.shortlist],
             "review": [_ranked_result_to_dict(r) for r in ranked.review],
             "excluded": [_ranked_result_to_dict(r) for r in ranked.excluded],
-            "total": _totals(snapshot)["total"],
+            "total": _totals(snapshot, ranked)["total"],
             "refreshed_at": snapshot["refreshed_at"],
             "stale": _is_degraded(snapshot),
         }
@@ -481,7 +568,7 @@ def create_app(source_path=None, policy=None, db_path=None,
     def shortlist() -> dict:
         _ensure_loaded(app)
         snapshot = app.state.snapshot
-        ranked = snapshot["ranked"]
+        ranked = _served_view(app, snapshot).ranked
         return {
             "shortlist": [_ranked_result_to_dict(r) for r in ranked.shortlist],
             "total": len(ranked.shortlist),
@@ -492,7 +579,10 @@ def create_app(source_path=None, policy=None, db_path=None,
     def job_detail(job_id: str) -> dict:
         _ensure_loaded(app)
         snapshot = app.state.snapshot
-        result = snapshot["index"].get(job_id)
+        view = _served_view(app, snapshot)
+        # A posting folded away by a merge still resolves (its detail carries
+        # the duplicate_resolution that explains where it went).
+        result = view.index.get(job_id) or view.folded.get(job_id) or snapshot["index"].get(job_id)
         if result is None:
             raise HTTPException(status_code=404, detail="job not found")
         return _ranked_result_to_dict(result)
@@ -502,8 +592,9 @@ def create_app(source_path=None, policy=None, db_path=None,
         _ensure_loaded(app)
         snapshot = app.state.snapshot
         policy = app.state.policy
+        view = _served_view(app, snapshot)
         body = {
-            "totals": _totals(snapshot),
+            "totals": _totals(snapshot, view.ranked),
             "policy": {
                 "salary_floor_hourly": SALARY_FLOOR_HOURLY,
                 "salary_floor_annual": policy.salary_floor_annual,
@@ -526,8 +617,16 @@ def create_app(source_path=None, policy=None, db_path=None,
             }
             body["matrix"] = ingestion["matrix"]
             body["served"] = {
-                **_totals(snapshot),
-                "exact_duplicate_count_sum": _exact_duplicate_count_sum(snapshot),
+                **_totals(snapshot, view.ranked),
+                "exact_duplicate_count_sum": _exact_duplicate_count_sum(snapshot, view.ranked),
+            }
+            # Resolved counts sit next to (never inside) the raw ingestion
+            # numbers above. served_before_decisions is what would be served
+            # with the overlay off.
+            body["duplicates"] = {
+                **view.summary,
+                "served_before_decisions": _totals(snapshot),
+                "store": view.store,
             }
             body["staleness"] = _staleness(snapshot.get("health") or {})
             body["freshness"] = _freshness_block(app, snapshot)
@@ -550,7 +649,66 @@ def create_app(source_path=None, policy=None, db_path=None,
                 },
             )
         snapshot = app.state.snapshot
-        return {"refreshed_at": snapshot["refreshed_at"], "totals": _totals(snapshot)}
+        return {
+            "refreshed_at": snapshot["refreshed_at"],
+            "totals": _totals(snapshot, _served_view(app, snapshot).ranked),
+        }
+
+    @app.get("/api/duplicates")
+    def duplicates() -> dict:
+        _ensure_loaded(app)
+        snapshot = app.state.snapshot
+        view = _served_view(app, snapshot)
+        return {
+            "enabled": app.state.resolutions.enabled,
+            "groups": list(view.groups),
+            "summary": view.summary,
+            "store": view.store,
+            "refreshed_at": snapshot["refreshed_at"],
+            "stale": _is_degraded(snapshot),
+        }
+
+    # The guard is a route dependency so it runs before the body is validated:
+    # a cross-site or non-JSON request is refused (403/415), never parsed.
+    @app.post("/api/duplicates/{fingerprint}/events", dependencies=[Depends(_require_local_write)])
+    def duplicate_event(fingerprint: str, body: DuplicateEventBody) -> dict:
+        resolutions = app.state.resolutions
+        if not resolutions.enabled:
+            raise HTTPException(status_code=503, detail="decisions are not saved in this mode (no state folder)")
+        if not _FINGERPRINT_RE.match(fingerprint):
+            raise HTTPException(status_code=404, detail="no such duplicate group")
+        _ensure_loaded(app)
+        # One writer at a time, and the group is looked up against the CURRENT
+        # snapshot under the lock: a decision is only ever recorded for a group
+        # that exists right now, with the member ids this backend computed
+        # (never ids supplied by the client).
+        with resolutions.write_lock:
+            snapshot = app.state.snapshot
+            view = _served_view(app, snapshot)
+            group = group_lookup(view).get(fingerprint)
+            if group is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="no such duplicate group in the current data (it may have changed; reload)",
+                )
+            try:
+                if body.type == "undo":
+                    if body.action is not None or body.kept_jobfinder_id is not None or body.note is not None:
+                        raise ResolutionError("undo takes no action, kept_jobfinder_id or note")
+                    event = resolutions.record_undo(fingerprint)
+                else:
+                    if body.action is None:
+                        raise ResolutionError("resolve needs an action: keep, merge or dismiss")
+                    event = resolutions.record_resolve(group, body.action, body.kept_jobfinder_id, body.note)
+            except ResolutionError as exc:
+                raise HTTPException(status_code=exc.status, detail=str(exc))
+            view = _served_view(app, snapshot)
+        return {
+            "event": event,
+            "group": next((g for g in view.groups if g["fingerprint"] == fingerprint), None),
+            "summary": view.summary,
+            "totals": _totals(snapshot, view.ranked),
+        }
 
     @app.get("/api/gate")
     def gate() -> dict:
