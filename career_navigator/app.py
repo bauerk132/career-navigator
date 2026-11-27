@@ -35,6 +35,26 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import freshness
 from .adapters import default_source_path, load_postings
+from .applications import (
+    TEXT_MAX as APPLICATION_TEXT_MAX,
+    ApplicationError,
+    ApplicationState,
+    Applications,
+    build_board,
+    category_label,
+    export_rows,
+    export_token,
+    write_export,
+)
+from .tracker_adapter import (
+    PRIVATE_COLUMNS,
+    STATUSES as TRACKER_STATUSES,
+    TrackerError,
+    file_signature as tracker_signature,
+    load_tracker,
+    parse_date,
+    resolve_tracker_path,
+)
 from .contracts import CURRENT_PAY_HOURLY
 from .duplicate_resolutions import (
     DuplicateResolutions,
@@ -487,6 +507,147 @@ class ReviewEventBody(BaseModel):
     note: str | None = Field(default=None, max_length=500)
 
 
+class ApplicationEventBody(BaseModel):
+    """One write to applications.jsonl from the board. Only these fields;
+    anything else is refused (422). Which fields a type needs is checked in
+    the route."""
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["move", "next_step", "follow_up", "note", "unlink", "undo"]
+    status: str | None = Field(default=None, max_length=40)
+    text: str | None = Field(default=None, max_length=APPLICATION_TEXT_MAX["note"])
+    date: str | None = Field(default=None, max_length=10)
+    event_id: str | None = Field(default=None, max_length=64)
+
+
+class TrackBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ExportBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    token: str = Field(min_length=16, max_length=16)
+
+
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1"})
+
+
+def _is_local_client(request: Request) -> bool:
+    """confirmation_number and notes are served only to a client on this machine."""
+    client = request.client
+    return client is not None and client.host in _LOOPBACK_HOSTS
+
+
+def _public_card(card: dict, local: bool) -> dict:
+    if local:
+        return card
+    stripped = dict(card)
+    for column in PRIVATE_COLUMNS:
+        stripped[column] = None
+    stripped["cn_notes"] = [{k: v for k, v in n.items() if k != "text"} for n in card["cn_notes"]]
+    stripped["private_hidden"] = True
+    return stripped
+
+
+def _tracker(app: FastAPI):
+    """(TrackerImport or None, error or None), re-read only when the file changes."""
+    path = app.state.tracker_path
+    if path is None:
+        return None, None
+    signature = tracker_signature(path)
+    cached = app.state.tracker_cache
+    if cached is not None and cached[0] == signature and signature is not None:
+        return cached[1], cached[2]
+    try:
+        tracker, error = load_tracker(path), None
+    except TrackerError as exc:
+        tracker, error = None, str(exc)
+    app.state.tracker_cache = (signature, tracker, error)
+    return tracker, error
+
+
+def _board(app: FastAPI):
+    """(board, tracker, application state, store info, tracker error)."""
+    _ensure_loaded(app)
+    view = _served_view(app, app.state.snapshot)
+    tracker, tracker_error = _tracker(app)
+    applications = app.state.applications
+    store = {"enabled": applications.enabled, "events": 0, "skipped_lines": 0, "error": None}
+    try:
+        state = applications.state()
+    except StateError as exc:
+        store["error"] = str(exc)
+        state = ApplicationState({}, (), 0, 0, ("error", store["error"]))
+    store["events"] = state.event_count
+    store["skipped_lines"] = state.skipped
+    key = (id(view), tracker.sha256 if tracker else tracker_error, state.signature,
+           state.event_count, parse_date(datetime.now().date().isoformat())[0])
+    cached = app.state.board_cache
+    if cached is not None and cached[0] == key and cached[1] is view:
+        return cached[2], tracker, state, store, tracker_error
+    postings = list(view.index.values()) + list(getattr(view, "folded", {}).values())
+    board = build_board(tracker, state, postings, job_id)
+    app.state.board_cache = (key, view, board)
+    return board, tracker, state, store, tracker_error
+
+
+_APPLICATION_FIELDS = {
+    "move": {"status"},
+    "next_step": {"text"},
+    "follow_up": {"date"},
+    "note": {"text"},
+    "unlink": set(),
+    "undo": {"event_id"},
+}
+
+
+def _application_event(card: dict, body: "ApplicationEventBody") -> dict:
+    """Turn a board request into an event for this card. Ids, keys and the
+    matched JobFinder id come from the backend's own board, never the client."""
+    given = {f for f in ("status", "text", "date", "event_id") if getattr(body, f) is not None}
+    extra = given - _APPLICATION_FIELDS[body.type]
+    if extra:
+        raise ApplicationError(f"{body.type} does not take {', '.join(sorted(extra))}")
+    event = {"type": body.type, "app_key": card["app_key"]}
+    if body.type == "move":
+        if body.status not in TRACKER_STATUSES:
+            raise ApplicationError(f"status must be one of {', '.join(TRACKER_STATUSES)}")
+        if body.status == card["status"]:
+            raise ApplicationError(f"this card is already {body.status}", status=409)
+        event["status"] = body.status
+    elif body.type == "next_step":
+        text = (body.text or "").strip()
+        if len(text) > APPLICATION_TEXT_MAX["next_step"]:
+            raise ApplicationError(f"next step must be at most {APPLICATION_TEXT_MAX['next_step']} characters")
+        event["text"] = text or None
+    elif body.type == "follow_up":
+        if body.date is None or not body.date.strip():
+            event["date"] = None
+        else:
+            iso, ok = parse_date(body.date.strip())
+            if not ok or iso != body.date.strip():
+                raise ApplicationError("follow-up date must be a real date written YYYY-MM-DD")
+            event["date"] = iso
+    elif body.type == "note":
+        text = (body.text or "").strip()
+        if not text:
+            raise ApplicationError("a note needs some text")
+        event["text"] = text
+    elif body.type == "unlink":
+        match = card.get("match")
+        if match is None or match["basis"] == "tracked_from_shortlist":
+            raise ApplicationError("this card has no automatic match to unlink", status=409)
+        if not isinstance(match.get("jobfinder_id"), int):
+            raise ApplicationError("the matched posting has no JobFinder id", status=409)
+        event["jobfinder_id"] = match["jobfinder_id"]
+    else:  # undo
+        if body.event_id not in {c["event_id"] for c in card["changes"]}:
+            raise ApplicationError("that change is not in force on this card", status=409)
+        event["undoes"] = body.event_id
+    return event
+
+
 def _require_local_write(request: Request) -> None:
     """Guard for every route that writes to the state folder.
 
@@ -506,7 +667,8 @@ def _require_local_write(request: Request) -> None:
 
 
 def create_app(source_path=None, policy=None, db_path=None,
-               reload_interval=None, task_check=None, state_dir=None) -> FastAPI:
+               reload_interval=None, task_check=None, state_dir=None,
+               tracker_path=None) -> FastAPI:
     """Build the API. Live mode when db_path is given, else when the
     JOBFINDER_DB_PATH env var is set and non-empty; otherwise synthetic
     mode. An explicit db_path wins over the env var.
@@ -518,6 +680,8 @@ def create_app(source_path=None, policy=None, db_path=None,
     state_dir: folder for Kyle's local decision logs (duplicate_resolutions.jsonl
     and later workstreams'). Defaults to CN_STATE_DIR, then ~/career-navigator-state
     in live mode; the synthetic backend has none and cannot write.
+    tracker_path: Kyle's job_tracker.csv (read only, never written). Defaults
+    to CN_TRACKER_CSV, then ~/job-search/job_tracker.csv in live mode when it exists.
     """
     resolved_db = db_path or os.environ.get("JOBFINDER_DB_PATH") or None
     if reload_interval is None:
@@ -575,6 +739,12 @@ def create_app(source_path=None, policy=None, db_path=None,
         resolve_state_dir(state_dir, live=resolved_db is not None)
     )
     app.state.view_cache = None
+    app.state.applications = Applications(
+        resolve_state_dir(state_dir, live=resolved_db is not None)
+    )
+    app.state.tracker_path = resolve_tracker_path(tracker_path, live=resolved_db is not None)
+    app.state.tracker_cache = None
+    app.state.board_cache = None
 
     @app.get("/health")
     def health() -> dict:
@@ -833,6 +1003,162 @@ def create_app(source_path=None, policy=None, db_path=None,
             "job": _ranked_result_to_dict(served) if served is not None else None,
             "summary": view.review.summary,
             "totals": _totals(snapshot, view.ranked),
+        }
+
+    # ----- Phase 3c WS4: applications board --------------------------------
+
+    def _board_payload(request: Request) -> dict:
+        board, tracker, _state, store, tracker_error = _board(app)
+        local = _is_local_client(request)
+        return {
+            "enabled": app.state.applications.enabled,
+            "available": tracker is not None,
+            "tracker": None if app.state.tracker_path is None else {
+                "file": app.state.tracker_path.name,
+                "rows": len(tracker.rows) if tracker else 0,
+                "sha256": tracker.sha256 if tracker else None,
+                "encoding": tracker.encoding if tracker else None,
+                "problems": list(tracker.problems) if tracker else [],
+                "error": tracker_error,
+                "baseline_export": board.baseline_export,
+            },
+            "statuses": list(TRACKER_STATUSES),
+            "columns": list(board.columns),
+            "cards": [_public_card(c, local) for c in board.cards],
+            "next_steps": list(board.next_steps),
+            "tracked_job_ids": board.tracked_job_ids,
+            "summary": board.summary,
+            "store": store,
+            "private_fields_served": local,
+            "refreshed_at": app.state.snapshot["refreshed_at"],
+        }
+
+    @app.get("/api/applications")
+    def applications_board(request: Request) -> dict:
+        return _board_payload(request)
+
+    def _require_applications():
+        if not app.state.applications.enabled:
+            raise HTTPException(status_code=503, detail="changes are not saved in this mode (no state folder)")
+
+    @app.post("/api/applications/{card_id}/events", dependencies=[Depends(_require_local_write)])
+    def application_event(card_id: str, body: ApplicationEventBody, request: Request) -> dict:
+        _require_applications()
+        if not _API_ID_RE.match(card_id):
+            raise HTTPException(status_code=404, detail="no such card")
+        applications = app.state.applications
+        # One writer at a time; the card is looked up in the CURRENT board under
+        # the lock, and its event key and match come from this backend.
+        with applications.write_lock:
+            board, *_ = _board(app)
+            card = board.by_id.get(card_id)
+            if card is None:
+                raise HTTPException(status_code=404, detail="no such card (the tracker may have changed; reload)")
+            try:
+                event = _application_event(card, body)
+                saved = applications.append(event)
+            except ApplicationError as exc:
+                raise HTTPException(status_code=exc.status, detail=str(exc))
+            board, *_ = _board(app)
+        updated = board.by_id.get(card_id)
+        return {
+            "event": {k: v for k, v in saved.items() if k != "text"},
+            "card": _public_card(updated, _is_local_client(request)) if updated else None,
+            "summary": board.summary,
+        }
+
+    @app.post("/api/jobs/{job_id}/track", dependencies=[Depends(_require_local_write)])
+    def track_job(job_id: str, body: TrackBody, request: Request) -> dict:
+        _require_applications()
+        if not _API_ID_RE.match(job_id):
+            raise HTTPException(status_code=404, detail="job not found")
+        applications = app.state.applications
+        with applications.write_lock:
+            board, *_ = _board(app)
+            view = _served_view(app, app.state.snapshot)
+            result = view.index.get(job_id)
+            if result is None:
+                raise HTTPException(status_code=404, detail="job not found (it may have changed; reload)")
+            if job_id in board.tracked_job_ids:
+                raise HTTPException(status_code=409, detail="this job is already on the applications board")
+            upstream = result.contract.upstream_records or {}
+            jobfinder_id = upstream.get("id")
+            if not isinstance(jobfinder_id, int) or isinstance(jobfinder_id, bool):
+                raise HTTPException(status_code=409, detail="this job has no JobFinder id, so it cannot be tracked")
+            posting = result.contract.posting or {}
+            family = str(upstream.get("family") or "")
+            try:
+                saved = applications.append({
+                    "type": "track",
+                    "app_key": f"job:{jobfinder_id}",
+                    "jobfinder_id": jobfinder_id,
+                    "api_id": job_id,
+                    "title": str(posting.get("title", ""))[:300],
+                    "company": str(posting.get("company", ""))[:300],
+                    "location": str(posting.get("location", ""))[:300],
+                    "pay": str(result.contract.pay.raw or "")[:200],
+                    "category": category_label(family) if family else "",
+                    "url": str(result.contract.source.get("url", ""))[:2000],
+                })
+            except ApplicationError as exc:
+                raise HTTPException(status_code=exc.status, detail=str(exc))
+            board, *_ = _board(app)
+        card_id = board.tracked_job_ids.get(job_id)
+        card = board.by_id.get(card_id) if card_id else None
+        return {"event": saved, "card": _public_card(card, _is_local_client(request)) if card else None,
+                "summary": board.summary}
+
+    @app.get("/api/applications/export/preview")
+    def export_preview(request: Request) -> dict:
+        board, tracker, state, _store, tracker_error = _board(app)
+        if tracker is None:
+            raise HTTPException(status_code=409, detail=tracker_error or "no tracker file is configured")
+        _header, rows, changes = export_rows(tracker, board)
+        if not _is_local_client(request):
+            for change in changes:
+                for column in change["columns"]:
+                    if column["private"]:
+                        column["before"] = column["after"] = None
+        return {
+            "enabled": app.state.applications.enabled,
+            "token": export_token(tracker, state),
+            "rows": len(rows),
+            "tracker_rows": len(tracker.rows),
+            "changed_rows": sum(1 for c in changes if not c["new_row"]),
+            "new_rows": sum(1 for c in changes if c["new_row"]),
+            "changes": changes,
+            "original": {"file": tracker.path.name, "sha256": tracker.sha256},
+            "folder": str(app.state.applications.export_dir) if app.state.applications.enabled else None,
+        }
+
+    @app.post("/api/applications/export", dependencies=[Depends(_require_local_write)])
+    def export_tracker(body: ExportBody) -> dict:
+        _require_applications()
+        applications = app.state.applications
+        with applications.write_lock:
+            board, tracker, state, _store, tracker_error = _board(app)
+            if tracker is None:
+                raise HTTPException(status_code=409, detail=tracker_error or "no tracker file is configured")
+            if body.token != export_token(tracker, state):
+                raise HTTPException(status_code=409, detail="the tracker or your changes moved since the preview; preview again")
+            header, rows, changes = export_rows(tracker, board)
+            try:
+                written = write_export(tracker.path, applications.export_dir, header, rows)
+                applications.append({
+                    "type": "export", "file": written["file"], "sha256": written["sha256"],
+                    "rows": written["rows"], "original_sha256": written["original_sha256"],
+                    "changed_rows": sum(1 for c in changes if not c["new_row"]),
+                    "new_rows": sum(1 for c in changes if c["new_row"]),
+                })
+            except (ApplicationError, TrackerError) as exc:
+                status = exc.status if isinstance(exc, ApplicationError) else 409
+                raise HTTPException(status_code=status, detail=str(exc))
+            board, *_ = _board(app)
+        return {
+            "file": written["file"], "path": written["path"], "sha256": written["sha256"],
+            "rows": written["rows"], "original_sha256": written["original_sha256"],
+            "original_unchanged": written["original_sha256"] == tracker.sha256,
+            "summary": board.summary,
         }
 
     @app.get("/api/gate")
