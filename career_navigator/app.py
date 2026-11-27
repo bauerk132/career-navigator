@@ -153,6 +153,29 @@ def _ranked_result_to_dict(result: RankedResult) -> dict:
     }
 
 
+def _snapshot_provenance(snapshot: dict) -> dict:
+    health = snapshot.get("health") or {}
+    sources = {}
+    for item in health.get("sources") or []:
+        name = item.get("name")
+        ran_at = item.get("ran_at")
+        if name and ran_at:
+            # Only expose canonical feed IDs; never leak arbitrary DB values.
+            if name in {"indeed_email", "linkedin_email", "manual"}:
+                try:
+                    parsed = parse_eastern(ran_at)
+                    if parsed is None:
+                        continue
+                except (TypeError, ValueError):
+                    continue
+                sources[name] = ran_at
+    return {
+        "loaded_at": snapshot["refreshed_at"],
+        "source_runs_status": "available" if sources else "unavailable",
+        "source_runs": sources,
+    }
+
+
 def _totals(snapshot: dict, ranked=None) -> dict:
     # Takes the snapshot bound once by the endpoint (C-N4) so a /api/refresh
     # interleaving mid-request can never mix generations inside one response.
@@ -778,7 +801,7 @@ def create_app(source_path=None, policy=None, db_path=None,
         _ensure_loaded(app)
         snapshot = app.state.snapshot
         ranked = _served_view(app, snapshot).ranked
-        return {
+        body = {
             "shortlist": [_ranked_result_to_dict(r) for r in ranked.shortlist],
             "review": [_ranked_result_to_dict(r) for r in ranked.review],
             "excluded": [_ranked_result_to_dict(r) for r in ranked.excluded],
@@ -786,17 +809,23 @@ def create_app(source_path=None, policy=None, db_path=None,
             "refreshed_at": snapshot["refreshed_at"],
             "stale": _is_degraded(snapshot),
         }
+        if snapshot.get("source") == "live":
+            body["snapshot_provenance"] = _snapshot_provenance(snapshot)
+        return body
 
     @app.get("/api/jobs/shortlist")
     def shortlist() -> dict:
         _ensure_loaded(app)
         snapshot = app.state.snapshot
         ranked = _served_view(app, snapshot).ranked
-        return {
+        body = {
             "shortlist": [_ranked_result_to_dict(r) for r in ranked.shortlist],
             "total": len(ranked.shortlist),
             "refreshed_at": snapshot["refreshed_at"],
         }
+        if snapshot.get("source") == "live":
+            body["snapshot_provenance"] = _snapshot_provenance(snapshot)
+        return body
 
     @app.get("/api/jobs/{job_id}")
     def job_detail(job_id: str) -> dict:
@@ -808,7 +837,10 @@ def create_app(source_path=None, policy=None, db_path=None,
         result = view.index.get(job_id) or view.folded.get(job_id) or snapshot["index"].get(job_id)
         if result is None:
             raise HTTPException(status_code=404, detail="job not found")
-        return _ranked_result_to_dict(result)
+        body = _ranked_result_to_dict(result)
+        if snapshot.get("source") == "live":
+            body["snapshot_provenance"] = _snapshot_provenance(snapshot)
+        return body
 
     @app.get("/api/stats")
     def stats() -> dict:

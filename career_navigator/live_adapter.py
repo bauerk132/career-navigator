@@ -22,7 +22,7 @@ from .pay import parse_pay
 from .pipeline import Evaluation
 from .policy import Policy
 from .relevance import score
-from .text import clean_text
+from .text import clean_text, make_excerpt
 from .urls import canonical_url
 
 EXPECTED_USER_VERSION = 0
@@ -288,6 +288,7 @@ def load_live_database(path: str | Path, policy: Policy | None = None) -> LiveIm
         location = clean_text(_decode_text(record["location"], "location", row_id)).strip()
         details = clean_text(_decode_text(record["details"], "details", row_id)).strip()
         source = clean_text(_decode_text(record["source"], "source", row_id)).strip() or "jobfinder"
+        canonical_source = source if source in {"indeed_email", "linkedin_email", "manual"} else "jobfinder"
         pay_text = clean_text(_decode_text(record["pay_text"], "pay_text", row_id)).strip()
         # Parse with CN's parser as a validation/re-derivation step. Preserve sanitized
         # pay text in Posting; upstream pay_top remains provenance only.
@@ -303,6 +304,8 @@ def load_live_database(path: str | Path, policy: Policy | None = None) -> LiveIm
                 upstream[name] = _parse_optional_float(val, name, row_id)
 
         upstream.update({
+            "source": canonical_source,
+            "details_excerpt": make_excerpt(details),
             "url": url,
             "canonical_url": identity.url,
             "provider": identity.provider,
