@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .dedup import group_duplicates
+from .duplicate_resolutions import group_fingerprint
 from .eligibility import evaluate
 from .models import Decision, Posting, Reason
 from .pay import parse_pay
@@ -342,6 +343,18 @@ def load_live_database(path: str | Path, policy: Policy | None = None) -> LiveIm
                     member == representative,
                 )
         else:
+            if group.confidence == "uncertain":
+                # Expose the group, don't change it (Phase 3c WS5): each member
+                # carries the group fingerprint and every member's JobFinder id
+                # so a decision can be recorded against exactly this group.
+                member_ids = [upstream_by_posting[m].get("id") for m in group.members]
+                if all(isinstance(i, int) for i in member_ids):
+                    dup_group = {
+                        "fingerprint": group_fingerprint(member_ids),
+                        "member_ids": sorted(member_ids),
+                    }
+                    for member in group.members:
+                        upstream_by_posting[member]["dup_group"] = dup_group
             for member in group.members:
                 group_info[member] = (group.confidence, group.reason, 1, True)
     imported = tuple(
