@@ -17,17 +17,22 @@ stale: true in the envelope.
 Run: uvicorn career_navigator.app:app --host 127.0.0.1 --port 8000
 """
 import hashlib
+import json
 import os
+import re
+import threading
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from . import freshness
 from .adapters import default_source_path, load_postings
 from .contracts import CURRENT_PAY_HOURLY
+from .freshness import parse_eastern
 from .live_adapter import (
     LiveAdapterError,
     evaluate_live_import,
@@ -47,8 +52,16 @@ _LOCAL_ORIGINS = (
 
 # Staleness threshold for /api/stats (S3): a refresh older than this is stale.
 _STALE_THRESHOLD_HOURS = 26.0
-# JobFinder timestamps are naive US Eastern local time (S3/F-03).
-_EASTERN = ZoneInfo("America/New_York")
+# Keys of the /api/gate response. The report body is never returned.
+_GATE_RESPONSE_KEYS = frozenset({
+    "available", "file", "date", "verdict", "finished_at",
+    "hard_failures", "soft_failures", "checks", "error",
+})
+# Consecutive failed watcher probes before the freshness block reports degraded.
+_PROBE_FAILURE_LIMIT = 3
+# A real gate report is a few KB; refuse anything bigger rather than load it.
+_GATE_REPORT_MAX_BYTES = 1_000_000
+_GATE_REPORT_RE = re.compile(r"^live_gate_report\.(\d{4}-\d{2}-\d{2})\.json$")
 
 
 def job_id(source: dict) -> str:
@@ -124,35 +137,9 @@ def _exact_duplicate_count_sum(snapshot: dict) -> int:
     return total
 
 
-def _parse_eastern_timestamp(value):
-    """Parse a JobFinder timestamp into an aware datetime.
-
-    JobFinder stores naive US Eastern local time ("2026-11-19 09:00" or
-    ISO "2026-11-20T09:00:04"); a value that already carries an offset is
-    used as-is. Returns None when the value is missing or unparseable.
-    """
-    if value is None:
-        return None
-    text = str(value).strip()
-    if not text:
-        return None
-    parsed = None
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError:
-        parsed = None
-    if parsed is None:
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
-            try:
-                parsed = datetime.strptime(text, fmt)
-                break
-            except ValueError:
-                continue
-    if parsed is None:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=_EASTERN)
-    return parsed
+# JobFinder timestamps are naive US Eastern local time (S3/F-03). The parser
+# lives in freshness.py; the old name stays importable from here.
+_parse_eastern_timestamp = parse_eastern
 
 
 def _staleness(health: dict) -> dict:
@@ -181,13 +168,24 @@ def _staleness(health: dict) -> dict:
     }
 
 
+def _file_mtime(path) -> float | None:
+    try:
+        return os.stat(path).st_mtime
+    except OSError:
+        return None
+
+
 def _reload(app: FastAPI) -> None:
     policy = app.state.policy
     if app.state.db_path is not None:
+        # mtime is taken before the read so a write during the load is seen
+        # as a change by the next watcher tick.
+        db_mtime = _file_mtime(app.state.db_path)
         live_import = load_live_database(app.state.db_path, policy)
         ranked = rank_evaluations(evaluate_live_import(live_import, policy), policy)
         health = dict(live_import.health)
         health["degraded"] = False
+        health["db_mtime"] = db_mtime
         # One snapshot object, swapped in a single assignment (C-N2): a
         # concurrent refresh+read can never mix generations.
         app.state.snapshot = {
@@ -220,18 +218,203 @@ def _is_degraded(snapshot: dict) -> bool:
     return bool((snapshot.get("health") or {}).get("degraded"))
 
 
-def create_app(source_path=None, policy=None, db_path=None) -> FastAPI:
+def _safe_reload(app: FastAPI) -> tuple[bool, str | None]:
+    """Reload under app.state.reload_lock, keeping the last good snapshot.
+
+    Live mode with a snapshot in place: a LiveAdapterError keeps the old
+    snapshot, marks its health degraded, and returns (False, message).
+    Otherwise the reload runs directly and any error propagates (fail closed
+    at startup, when there is nothing to keep).
+    """
+    with app.state.reload_lock:
+        if app.state.db_path is not None and app.state.snapshot is not None:
+            try:
+                _reload(app)
+            except LiveAdapterError as exc:
+                snapshot = app.state.snapshot
+                health = snapshot.get("health") or {}
+                health["degraded"] = True
+                health["last_error"] = str(exc)
+                health["error_time"] = datetime.now(timezone.utc).isoformat()
+                snapshot["health"] = health
+                return False, str(exc)
+            return True, None
+        _reload(app)
+        return True, None
+
+
+def _watch_once(app: FastAPI) -> str:
+    """One watcher tick. Returns a short status string (see tests).
+
+    Probes jobfinder.db read-only. A probe error is not degradation (the DB
+    may be locked mid-run). A change in mtime or state.last_updated triggers
+    a reload unless the scheduled task is running, in which case the reload
+    waits for the next tick.
+    """
+    if app.state.db_path is None:
+        return "synthetic"
+    probe = freshness.probe_db(app.state.db_path)
+    app.state.last_probe = probe
+    if probe["error"]:
+        # One failure is silent (the DB may be locked mid-run); a run of them
+        # is surfaced by _freshness_block as degraded.
+        app.state.consecutive_probe_failures += 1
+        return "probe-error"
+    app.state.consecutive_probe_failures = 0
+    health = (app.state.snapshot or {}).get("health") or {}
+    changed = (
+        probe["mtime"] != health.get("db_mtime")
+        or probe["last_updated"] != health.get("last_updated")
+    )
+    if not changed:
+        return "unchanged"
+    if app.state.task_check() is True:
+        return "task-running"
+    ok, error = _safe_reload(app)
+    if ok:
+        app.state.auto_reload_error = None
+        app.state.last_auto_reload = datetime.now(timezone.utc).isoformat()
+        return "reloaded"
+    app.state.auto_reload_error = error
+    return "reload-failed"
+
+
+def _watch_loop(app: FastAPI, interval: float, stop: threading.Event) -> None:
+    while not stop.wait(interval):
+        try:
+            _watch_once(app)
+        except Exception as exc:  # the watcher must never die silently
+            app.state.auto_reload_error = f"{type(exc).__name__}: {exc}"
+
+
+def _freshness_block(app: FastAPI, snapshot: dict) -> dict:
+    health = snapshot.get("health") or {}
+    snapshot_degraded = _is_degraded(snapshot)
+    probe_degraded = app.state.consecutive_probe_failures >= _PROBE_FAILURE_LIMIT
+    probe_error = None
+    if probe_degraded:
+        probe_error = str((app.state.last_probe or {}).get("error") or "unknown error")[:200]
+    block = freshness.classify(
+        health.get("last_updated"),
+        sources=health.get("sources"),
+        db_last_updated=(app.state.last_probe or {}).get("last_updated"),
+        degraded=snapshot_degraded or probe_degraded,
+    )
+    if probe_degraded:
+        if not snapshot_degraded:
+            # Drop classify's generic "failed reload" reason; it is not what happened.
+            block["reasons"] = [r for r in block["reasons"]
+                                if not r.startswith("live backend is serving the last good snapshot")]
+        block["reasons"].append(f"cannot read jobfinder.db: {probe_error}")
+    block["probe_error"] = probe_error
+    block["loaded_at"] = snapshot["refreshed_at"]
+    block["rows"] = health.get("jobs_count")
+    block["watch_interval_seconds"] = app.state.reload_interval
+    return block
+
+
+def _read_gate_summary(reports_dir: str | None) -> dict:
+    """Summarize the newest dated live gate report, for /api/gate.
+
+    Report keys mapped (live_gate.py finalize() writes these; the report has
+    no soft_failures key, so it is derived):
+      verdict        <- report["verdict"]; anything other than PASS/FAIL is UNKNOWN
+      finished_at    <- report["finished_at"] (ISO string, or null)
+      hard_failures  <- len(report["hard_failures"]) (a list of check names);
+                        when absent, count checks with hard=True and passed=False
+      soft_failures  <- count of checks with hard=False and passed=False
+      checks         <- len(report["checks"])
+      date           <- the YYYY-MM-DD in the file name (ET date of the run)
+    Only the keys in _GATE_RESPONSE_KEYS are returned; the body is never
+    returned. An unreadable or malformed report yields verdict UNKNOWN with
+    an error message.
+    """
+    if not reports_dir or not Path(reports_dir).is_dir():
+        return {"available": False}
+    dated = []
+    try:
+        for entry in Path(reports_dir).iterdir():
+            match = _GATE_REPORT_RE.match(entry.name)
+            if match and entry.is_file():
+                dated.append((match.group(1), entry.name))
+    except OSError:
+        return {"available": False}
+    if not dated:
+        return {"available": False}
+    date, name = max(dated)
+    try:
+        path = Path(reports_dir) / name
+        if path.stat().st_size > _GATE_REPORT_MAX_BYTES:
+            raise ValueError("report too large")
+        report = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(report, dict):
+            raise ValueError("report is not an object")
+    except (OSError, ValueError, RecursionError):
+        return {"available": True, "file": name, "date": date,
+                "verdict": "UNKNOWN", "error": "unreadable report"}
+    raw_checks = report.get("checks") if isinstance(report.get("checks"), list) else []
+    checks = [c for c in raw_checks if isinstance(c, dict)]
+    hard_list = report.get("hard_failures")
+    if isinstance(hard_list, list):
+        hard_count = len(hard_list)
+    else:
+        hard_count = sum(1 for c in checks if c.get("hard") and c.get("passed") is False)
+    soft_count = sum(1 for c in checks if not c.get("hard") and c.get("passed") is False)
+    verdict = report.get("verdict")
+    finished = report.get("finished_at")
+    summary = {
+        "available": True,
+        "file": name,
+        "date": date,
+        "verdict": verdict if verdict in ("PASS", "FAIL") else "UNKNOWN",
+        "finished_at": finished if isinstance(finished, str) else None,
+        "hard_failures": hard_count,
+        "soft_failures": soft_count,
+        "checks": len(raw_checks),
+    }
+    return {k: v for k, v in summary.items() if k in _GATE_RESPONSE_KEYS}
+
+
+def create_app(source_path=None, policy=None, db_path=None,
+               reload_interval=None, task_check=None) -> FastAPI:
     """Build the API. Live mode when db_path is given, else when the
     JOBFINDER_DB_PATH env var is set and non-empty; otherwise synthetic
-    mode. An explicit db_path wins over the env var."""
+    mode. An explicit db_path wins over the env var.
+
+    reload_interval: seconds between database watcher ticks (live mode only;
+    0 disables the watcher). Defaults to CN_RELOAD_INTERVAL_SECONDS or 300.
+    task_check: callable returning True/False/None for "is the JobFinder
+    scheduled task running"; defaults to freshness.task_running.
+    """
     resolved_db = db_path or os.environ.get("JOBFINDER_DB_PATH") or None
+    if reload_interval is None:
+        try:
+            reload_interval = float(os.environ.get("CN_RELOAD_INTERVAL_SECONDS", "300"))
+        except ValueError:
+            reload_interval = 300.0
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # Startup fails closed in live mode: a bad database halts startup
         # instead of serving an empty or degraded snapshot (S5).
         _reload(app)
-        yield
+        stop = None
+        if app.state.db_path is not None and app.state.reload_interval > 0:
+            stop = threading.Event()
+            thread = threading.Thread(
+                target=_watch_loop,
+                args=(app, app.state.reload_interval, stop),
+                name="cn-db-watch",
+                daemon=True,
+            )
+            app.state.watch_thread = thread
+            thread.start()
+        try:
+            yield
+        finally:
+            if stop is not None:
+                stop.set()
+                app.state.watch_thread.join(timeout=2)
 
     app = FastAPI(title="Career Navigator API", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
@@ -244,6 +427,14 @@ def create_app(source_path=None, policy=None, db_path=None) -> FastAPI:
     app.state.source_path = source_path or default_source_path()
     app.state.db_path = resolved_db
     app.state.snapshot = None
+    app.state.reload_interval = float(reload_interval)
+    app.state.task_check = task_check or freshness.task_running
+    app.state.reload_lock = threading.Lock()
+    app.state.last_probe = None
+    app.state.consecutive_probe_failures = 0
+    app.state.last_auto_reload = None
+    app.state.auto_reload_error = None
+    app.state.watch_thread = None
 
     @app.get("/health")
     def health() -> dict:
@@ -269,6 +460,7 @@ def create_app(source_path=None, policy=None, db_path=None) -> FastAPI:
             if degraded:
                 body["degraded"] = True
                 body["last_error"] = live_health.get("last_error")
+            body["freshness"] = _freshness_block(app, snapshot)
         return body
 
     @app.get("/api/jobs")
@@ -338,6 +530,7 @@ def create_app(source_path=None, policy=None, db_path=None) -> FastAPI:
                 "exact_duplicate_count_sum": _exact_duplicate_count_sum(snapshot),
             }
             body["staleness"] = _staleness(snapshot.get("health") or {})
+            body["freshness"] = _freshness_block(app, snapshot)
         return body
 
     @app.post("/api/refresh")
@@ -345,28 +538,23 @@ def create_app(source_path=None, policy=None, db_path=None) -> FastAPI:
         # Runtime refresh failure (S5): keep the last good snapshot, mark
         # health degraded, and answer 503. A refresh with no snapshot yet
         # has nothing to retain, so the load error propagates (fail closed).
-        if app.state.db_path is not None and app.state.snapshot is not None:
-            try:
-                _reload(app)
-            except LiveAdapterError as exc:
-                snapshot = app.state.snapshot
-                health = snapshot.get("health") or {}
-                health["degraded"] = True
-                health["last_error"] = str(exc)
-                health["error_time"] = datetime.now(timezone.utc).isoformat()
-                snapshot["health"] = health
-                return JSONResponse(
-                    status_code=503,
-                    content={
-                        "status": "degraded",
-                        "error": str(exc),
-                        "snapshot_refreshed_at": snapshot["refreshed_at"],
-                    },
-                )
-        else:
-            _reload(app)
+        ok, error = _safe_reload(app)
+        if not ok:
+            snapshot = app.state.snapshot
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "degraded",
+                    "error": error,
+                    "snapshot_refreshed_at": snapshot["refreshed_at"],
+                },
+            )
         snapshot = app.state.snapshot
         return {"refreshed_at": snapshot["refreshed_at"], "totals": _totals(snapshot)}
+
+    @app.get("/api/gate")
+    def gate() -> dict:
+        return _read_gate_summary(os.environ.get("CN_GATE_REPORTS_DIR"))
 
     return app
 
