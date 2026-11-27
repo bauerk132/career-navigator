@@ -227,6 +227,9 @@ class ServedView:
     groups: tuple
     summary: dict
     store: dict
+    # Phase 3c WS7: the review-decisions overlay composed on top (a
+    # review_decisions.ReviewView), set by app._served_view; None when absent.
+    review: object = None
 
 
 def _result_upstream(result) -> dict:

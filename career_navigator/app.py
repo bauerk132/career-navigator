@@ -22,6 +22,7 @@ import os
 import re
 import threading
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -43,6 +44,13 @@ from .duplicate_resolutions import (
     group_lookup,
 )
 from .freshness import parse_eastern
+from .review_decisions import (
+    REASONS as REVIEW_REASONS,
+    ReviewDecisions,
+    ReviewError,
+    ReviewState,
+    build_review_view,
+)
 from .live_adapter import (
     LiveAdapterError,
     evaluate_live_import,
@@ -117,6 +125,11 @@ def _ranked_result_to_dict(result: RankedResult) -> dict:
         # group (keep / merge / dismiss), or None. Raw duplicate_confidence
         # above is never changed by a decision.
         "duplicate_resolution": upstream.get("duplicate_resolution"),
+        # Phase 3c WS7: on a Needs Review posting, the per-reason state of
+        # Kyle's review decisions (open / pass / reject / changed) and the
+        # status the posting is served under after them. cn_status above is
+        # always the raw policy status. None for rows that were never in review.
+        "review_decision": upstream.get("review_decision"),
     }
 
 
@@ -246,7 +259,18 @@ def _served_view(app: FastAPI, snapshot: dict):
     except StateError as exc:
         store["error"] = str(exc)
         state = None
-    signature = (state.signature, state.event_count) if state is not None else ("error", store["error"])
+    reviews = app.state.reviews
+    review_store = {"enabled": reviews.enabled, "events": 0, "skipped_lines": 0, "error": None}
+    try:
+        review_state = reviews.state()
+    except StateError as exc:
+        review_store["error"] = str(exc)
+        review_state = None
+    signature = (
+        (state.signature, state.event_count) if state is not None else ("error", store["error"]),
+        (review_state.signature, review_state.event_count) if review_state is not None
+        else ("error", review_store["error"]),
+    )
     cached = app.state.view_cache
     if cached is not None and cached[0] is snapshot and cached[1] == signature:
         return cached[2]
@@ -255,9 +279,21 @@ def _served_view(app: FastAPI, snapshot: dict):
     else:
         store["events"] = state.event_count
         store["skipped_lines"] = state.skipped
+    if review_state is None:
+        review_state = ReviewState({}, 0, 0, None)
+    else:
+        review_store["events"] = review_state.event_count
+        review_store["skipped_lines"] = review_state.skipped
     view = build_served_view(
         snapshot["ranked"], state, lambda source: job_id(source), store_info=store,
     )
+    # Review decisions go on top of the duplicate overlay (WS7). A row folded
+    # away by a duplicate merge is not in these lists, so it is never reviewed.
+    review_view = build_review_view(
+        view.ranked, review_state, app.state.policy, lambda source: job_id(source),
+        store_info=review_store,
+    )
+    view = replace(view, ranked=review_view.ranked, index=review_view.index, review=review_view)
     app.state.view_cache = (snapshot, signature, view)
     return view
 
@@ -437,6 +473,20 @@ class DuplicateEventBody(BaseModel):
     note: str | None = Field(default=None, max_length=500)
 
 
+_API_ID_RE = re.compile(r"^[0-9a-f]{12}$")
+
+
+class ReviewEventBody(BaseModel):
+    """One write to review_decisions.jsonl. Only these fields, only these event
+    types; anything else is refused (422)."""
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["decide", "undo"]
+    reason: Literal["pay", "location", "driving"]
+    verdict: Literal["pass", "reject"] | None = None
+    note: str | None = Field(default=None, max_length=500)
+
+
 def _require_local_write(request: Request) -> None:
     """Guard for every route that writes to the state folder.
 
@@ -519,6 +569,9 @@ def create_app(source_path=None, policy=None, db_path=None,
     app.state.auto_reload_error = None
     app.state.watch_thread = None
     app.state.resolutions = DuplicateResolutions(
+        resolve_state_dir(state_dir, live=resolved_db is not None)
+    )
+    app.state.reviews = ReviewDecisions(
         resolve_state_dir(state_dir, live=resolved_db is not None)
     )
     app.state.view_cache = None
@@ -628,6 +681,23 @@ def create_app(source_path=None, policy=None, db_path=None,
                 "served_before_decisions": _totals(snapshot),
                 "store": view.store,
             }
+            # Phase 3c WS7: same idea for eligibility review decisions. The raw
+            # by_decision counts in "ingestion" never change; these are the
+            # counts after Kyle's passes and rejects.
+            review = view.review
+            moved_up = review.summary["passed"]
+            moved_out = review.summary["rejected"]
+            served = _totals(snapshot, view.ranked)
+            body["review_decisions"] = {
+                **review.summary,
+                "served_before_review_decisions": {
+                    "shortlist": served["shortlist"] - moved_up,
+                    "review": served["review"] + moved_up + moved_out,
+                    "excluded": served["excluded"] - moved_out,
+                    "total": served["total"],
+                },
+                "store": review.store,
+            }
             body["staleness"] = _staleness(snapshot.get("health") or {})
             body["freshness"] = _freshness_block(app, snapshot)
         return body
@@ -707,6 +777,61 @@ def create_app(source_path=None, policy=None, db_path=None,
             "event": event,
             "group": next((g for g in view.groups if g["fingerprint"] == fingerprint), None),
             "summary": view.summary,
+            "totals": _totals(snapshot, view.ranked),
+        }
+
+    @app.get("/api/review")
+    def review_log() -> dict:
+        """Review decisions in force or set aside, newest first (Audit tab)."""
+        _ensure_loaded(app)
+        snapshot = app.state.snapshot
+        view = _served_view(app, snapshot)
+        return {
+            "enabled": app.state.reviews.enabled,
+            "decisions": list(view.review.audit),
+            "summary": view.review.summary,
+            "store": view.review.store,
+            "refreshed_at": snapshot["refreshed_at"],
+            "stale": _is_degraded(snapshot),
+        }
+
+    @app.post("/api/jobs/{job_id}/review", dependencies=[Depends(_require_local_write)])
+    def review_event(job_id: str, body: ReviewEventBody) -> dict:
+        reviews = app.state.reviews
+        if not reviews.enabled:
+            raise HTTPException(status_code=503, detail="decisions are not saved in this mode (no state folder)")
+        if not _API_ID_RE.match(job_id):
+            raise HTTPException(status_code=404, detail="job not found")
+        _ensure_loaded(app)
+        # One writer at a time; the posting is looked up in the CURRENT served
+        # data under the lock, so a decision is only recorded for a posting that
+        # is in the queue right now, with ids and fingerprint this backend
+        # computed (never values supplied by the client).
+        with reviews.write_lock:
+            snapshot = app.state.snapshot
+            view = _served_view(app, snapshot)
+            result = view.index.get(job_id)
+            if result is None:
+                raise HTTPException(status_code=404, detail="job not found (it may have changed; reload)")
+            try:
+                if body.type == "undo":
+                    if body.verdict is not None or body.note is not None:
+                        raise ReviewError("undo takes no verdict or note")
+                    # Undo works on the raw review reasons even when a decision has
+                    # moved the posting out of the review list.
+                    event = reviews.record_undo(result, body.reason)
+                else:
+                    if body.verdict is None:
+                        raise ReviewError("decide needs a verdict: pass or reject")
+                    event = reviews.record_decide(result, job_id, body.reason, body.verdict, body.note)
+            except ReviewError as exc:
+                raise HTTPException(status_code=exc.status, detail=str(exc))
+            view = _served_view(app, snapshot)
+        served = view.index.get(job_id)
+        return {
+            "event": event,
+            "job": _ranked_result_to_dict(served) if served is not None else None,
+            "summary": view.review.summary,
             "totals": _totals(snapshot, view.ranked),
         }
 
