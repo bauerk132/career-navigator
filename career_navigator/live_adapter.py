@@ -7,6 +7,7 @@ provenance; Career Navigator remains the decision authority.
 """
 from __future__ import annotations
 
+import hashlib
 import math
 import sqlite3
 from dataclasses import dataclass
@@ -321,6 +322,11 @@ def load_live_database(path: str | Path, policy: Policy | None = None) -> LiveIm
         )
         decision = evaluate(posting, active_policy)
         upstream["cn_assessment"] = {
+            # Phase 3c WS7: a hash of the posting text the location/driving
+            # rules read, so a saved review decision can tell when the posting
+            # text changed. Provenance only; no rule reads it.
+            "details_fp": hashlib.sha256(
+                " ".join(details.split()).casefold().encode("utf-8")).hexdigest()[:16],
             "status": decision.status,
             "reasons": tuple((reason.factor, reason.outcome, reason.evidence)
                              for reason in decision.reasons),
