@@ -26,6 +26,8 @@ from fastapi.testclient import TestClient
 from career_navigator import review_decisions as rd
 from career_navigator.app import create_app, job_id
 
+from state_helpers import db_exists, read_events
+
 from test_live_wiring import _row, _write_db
 
 WRITE = {"X-CN-Write": "1"}
@@ -129,9 +131,7 @@ class ApiBase(unittest.TestCase):
         return self.state_dir / "review_decisions.jsonl"
 
     def log_lines(self):
-        if not self.log_path.exists():
-            return []
-        return [json.loads(line) for line in self.log_path.read_text(encoding="utf-8").splitlines() if line]
+        return read_events(self.state_dir, "review_decisions")
 
     def post(self, client, row_id, body, headers=None):
         return client.post(f"/api/jobs/{_api_id(row_id)}/review", json=body,
@@ -177,7 +177,7 @@ class QueueTests(ApiBase):
         self.assertEqual(stats["totals"], {"shortlist": 1, "review": 5, "excluded": 0, "total": 6})
         self.assertEqual(stats["review_decisions"]["open"], 5)
         self.assertEqual(stats["review_decisions"]["decisions_in_force"], 0)
-        self.assertFalse(self.log_path.exists())
+        self.assertFalse(db_exists(self.state_dir))
         self.assertIsNone(self.lists(client)["shortlist"][5]["review_decision"])
         self.assertEqual(self.db_digest, _digest(self.db))
 
@@ -311,7 +311,7 @@ class DecisionTests(ApiBase):
         client = self.client()
         self.decide(client, 2, "pay", "pass")
         self.assertEqual(self.db_digest, _digest(self.db))
-        self.assertEqual({p.name for p in self.state_dir.iterdir()}, {"review_decisions.jsonl"})
+        self.assertEqual({p.name for p in self.state_dir.iterdir()}, {"career-navigator.db"})
 
 
 class ChangedPostingTests(ApiBase):
@@ -371,14 +371,14 @@ class GuardTests(ApiBase):
         r = client.post(f"/api/jobs/{_api_id(2)}/review", json={"type": "decide", "reason": "pay", "verdict": "pass"},
                         headers=ORIGIN)
         self.assertEqual(r.status_code, 403)
-        self.assertFalse(self.log_path.exists())
+        self.assertFalse(db_exists(self.state_dir))
 
     def test_foreign_origin_is_403(self):
         client = self.client()
         r = self.post(client, 2, {"type": "decide", "reason": "pay", "verdict": "pass"},
                       headers={"Origin": "https://evil.example"})
         self.assertEqual(r.status_code, 403)
-        self.assertFalse(self.log_path.exists())
+        self.assertFalse(db_exists(self.state_dir))
 
     def test_non_json_is_415(self):
         client = self.client()
@@ -397,7 +397,7 @@ class GuardTests(ApiBase):
             {"type": "decide", "reason": "pay", "verdict": "pass", "note": "x" * 501},
         ):
             self.assertEqual(self.post(client, 2, body).status_code, 422, body)
-        self.assertFalse(self.log_path.exists())
+        self.assertFalse(db_exists(self.state_dir))
 
     def test_decide_without_verdict_and_undo_with_verdict_are_400(self):
         client = self.client()
@@ -418,7 +418,7 @@ class GuardTests(ApiBase):
         self.assertEqual(self.post(client, 2, {"type": "decide", "reason": "driving", "verdict": "pass"}).status_code, 409)
         # The eligible control row has no review reasons at all.
         self.assertEqual(self.post(client, 5, {"type": "decide", "reason": "pay", "verdict": "pass"}).status_code, 409)
-        self.assertFalse(self.log_path.exists())
+        self.assertFalse(db_exists(self.state_dir))
 
     def test_no_state_folder_means_503_and_nothing_written(self):
         # Synthetic backend: no db, no state folder, so it can never write.

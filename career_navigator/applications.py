@@ -36,7 +36,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .state_store import JsonlLog, StateError
+from .sqlite_log import SqliteLog
+from .state_store import StateError
 from .tracker_adapter import (
     COLUMNS, STATUSES, TrackerImport, file_signature, load_tracker, parse_date, today_iso,
 )
@@ -221,7 +222,7 @@ class Applications:
     def __init__(self, state_dir):
         self.enabled = state_dir is not None
         self.state_dir = Path(state_dir) if self.enabled else None
-        self._log = JsonlLog(self.state_dir / APPLICATIONS_FILENAME) if self.enabled else None
+        self._log = SqliteLog(self.state_dir, "applications", APPLICATIONS_FILENAME) if self.enabled else None
         self.write_lock = threading.Lock()
 
     @property

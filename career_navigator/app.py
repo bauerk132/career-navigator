@@ -81,6 +81,7 @@ from .pipeline import evaluate_postings
 from .policy import SALARY_FLOOR_HOURLY, Policy
 from .ranking import RankedResult, rank_evaluations
 from .state_store import StateError, resolve_state_dir
+from .state_tools import backup_if_due
 
 _LOCAL_ORIGINS = (
     "http://localhost:5173",
@@ -406,8 +407,24 @@ def _watch_once(app: FastAPI) -> str:
     return "reload-failed"
 
 
+def _backup_state(app: FastAPI) -> None:
+    """Take today's backup of career-navigator.db (live mode only). A
+    failure is recorded, never fatal."""
+    if app.state.db_path is None or app.state.state_dir is None:
+        return
+    try:
+        made = backup_if_due(app.state.state_dir)
+    except Exception as exc:  # a backup problem must never stop the backend
+        app.state.backup_error = f"{type(exc).__name__}: {exc}"
+        return
+    app.state.backup_error = None
+    if made is not None:
+        app.state.last_backup = str(made)
+
+
 def _watch_loop(app: FastAPI, interval: float, stop: threading.Event) -> None:
     while not stop.wait(interval):
+        _backup_state(app)
         try:
             _watch_once(app)
         except Exception as exc:  # the watcher must never die silently
@@ -717,6 +734,7 @@ def create_app(source_path=None, policy=None, db_path=None,
     async def lifespan(app: FastAPI):
         # Startup fails closed in live mode: a bad database halts startup
         # instead of serving an empty or degraded snapshot (S5).
+        _backup_state(app)
         _reload(app)
         stop = None
         if app.state.db_path is not None and app.state.reload_interval > 0:
@@ -755,16 +773,13 @@ def create_app(source_path=None, policy=None, db_path=None,
     app.state.last_auto_reload = None
     app.state.auto_reload_error = None
     app.state.watch_thread = None
-    app.state.resolutions = DuplicateResolutions(
-        resolve_state_dir(state_dir, live=resolved_db is not None)
-    )
-    app.state.reviews = ReviewDecisions(
-        resolve_state_dir(state_dir, live=resolved_db is not None)
-    )
+    app.state.state_dir = resolve_state_dir(state_dir, live=resolved_db is not None)
+    app.state.last_backup = None
+    app.state.backup_error = None
+    app.state.resolutions = DuplicateResolutions(app.state.state_dir)
+    app.state.reviews = ReviewDecisions(app.state.state_dir)
     app.state.view_cache = None
-    app.state.applications = Applications(
-        resolve_state_dir(state_dir, live=resolved_db is not None)
-    )
+    app.state.applications = Applications(app.state.state_dir)
     app.state.tracker_path = resolve_tracker_path(tracker_path, live=resolved_db is not None)
     app.state.tracker_cache = None
     app.state.board_cache = None
