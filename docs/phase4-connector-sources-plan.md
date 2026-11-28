@@ -20,7 +20,7 @@ So the plan is a hand-off through a file:
 | 4a: a safety net | 1 JobFinder under git | JobFinder changes have a history and can be undone |
 | 4b: the pull | 2 Daily connector pull, 3 JobFinder connector source | Connector jobs show up in the 9 AM digest next to the email jobs, with pay filled in |
 | 4c: the dashboard | 4 Career Navigator and dashboard accept the new sources | The dashboard shows where each connector job came from instead of a generic "jobfinder" label |
-| 4d: suburbs | 5 Philadelphia suburbs | Jobs in close Philadelphia suburbs pass, and border towns land in Needs Review |
+| 4d: suburbs | 5 Philadelphia suburbs | Jobs in close Philadelphia suburbs in PA pass, and border towns land in Needs Review |
 | 4e: the check | 6 Two-week source comparison | A count of what the connectors found that the email alerts missed |
 
 WS4's code lands before WS3's source is switched on in the 9 AM run. That way no connector row ever reaches Career Navigator under a name it doesn't know.
@@ -112,12 +112,11 @@ After WS1, and after both connectors' terms are checked (see Risks). Can be buil
 4. **File checks.** If `written_at` is more than 20 hours old, the source reports failed with "connector file is stale" and returns no jobs. A missing file, a file that isn't valid JSON or an unknown `schema_version` is reported the same way. A connector marked `failed` in the file makes that source report failed. All of these show in `source_runs`, so the health row is honest.
 5. **Stable identity.** Indeed's link changes every call, so the URL alone would add a new row every morning for the same job. For the two connector sources only, `save_job` first looks for an existing row with the same `source` and the same `dup_key` (company, title and city). If one exists, it updates that row and refreshes the link instead of inserting a new one. No column is added.
 6. **Across sources nothing changes.** An email copy and a connector copy of the same job are still two rows, linked by `dup_of` as today.
-7. For ZipRecruiter the writer builds the URL from `listing_key` and drops `match_token` **[unchecked: confirm a ZipRecruiter link without `match_token` opens the posting]**.
+7. For ZipRecruiter the link is kept whole, `match_token` included. Checked Nov 28: the only link the connector gives is `job-redirect?match_token=...&tsid=...`, and the job is identified only inside `match_token`. The token holds the `listing_key`, an id made fresh for each search and, for jobs on an employer's own site, that site's URL. So a link without it can't point at any job, and the token changes every day like Indeed's links. Rows still match on source plus `dup_key` (step 5), and the newest link wins. **[unchecked: whether a link from an earlier day still opens the posting. ZipRecruiter shows a Cloudflare check to the browser, which Kyle has to pass by hand]**.
 8. Add the two sources to `build_sources` so the 9 AM run picks them up. This step waits until WS4 has landed.
 9. Add labels for the two names to `SOURCE_LABEL` (`dashboard.py:17`), so JobFinder's own digest and health table don't show raw ids.
 10. Regenerate Career Navigator's JobFinder baseline with `baseline/make_manifest.py`, since `connector_file.py` is new and `sources/__init__.py` changes.
 11. The same filters, ranking and daily quotas apply. Connector jobs compete with email jobs for the same picks.
-12. Change `match_city` (`normalize.py:82`) to accept NJ for the New Jersey towns on WS5's list, and only those. Every other state outside PA is still rejected, so Pittsburgh and Philadelphia results don't change. The town names come from WS5 once Kyle signs off on the list.
 
 ### Acceptance criteria
 - Tests with a sample `connector_jobs.json`: good entries are stored, bad links are skipped, and a stale, missing or broken file reports failed with no crash.
@@ -148,25 +147,25 @@ After WS2, since the source names are fixed there. It must land before WS3 switc
 
 ## Workstream 5: Philadelphia suburbs
 
-Kyle's rule (Q4): a Philadelphia suburb counts if it is under 30 minutes by transit to Center City. Towns near the line go to Needs Review. Pittsburgh is unchanged.
+Kyle's rule (Q4): a Philadelphia suburb in PA counts if it is under 30 minutes by transit to Center City. Towns near the line go to Needs Review. New Jersey towns are left out (Q9). Pittsburgh is unchanged.
 
 ### Scope
-1. **One town list, built once.** Each town gets a weekday morning transit time from its main station (SEPTA Regional Rail, the Market-Frankford Line, the Norristown High Speed Line, a trolley, or PATCO for New Jersey) to Suburban Station, City Hall or the PATCO stops in Center City, taken from the published schedules. No map service is called at run time.
+1. **One town list, built once.** Each town gets a weekday morning transit time from its main station (SEPTA Regional Rail, the Market-Frankford Line, the Norristown High Speed Line or a trolley) to Suburban Station or City Hall, taken from the published schedules. No map service is called at run time.
 2. **Three bands.** Under 25 minutes passes. 25 to 35 minutes is the border and goes to Needs Review. Over 35 minutes stays out of area. Kyle confirmed on Nov 28 that a town at 25 to 30 minutes goes to Needs Review.
 3. **Kyle signs off on the list** before it goes into any code or config. Every time in it is marked **[unchecked]** until then.
 4. **JobFinder keeps the jobs.** Towns in the pass and border bands are added to the Philadelphia `nearby` list in `config.json`, so `match_city` (`normalize.py:82`) keeps them instead of rejecting them. For PA towns this is a config change, not a code change.
-5. **New Jersey goes to Needs Review for now (Q9).** No New Jersey town passes. New Jersey towns under 35 minutes on PATCO, such as Camden and Collingswood, go on the list in their own group, and every one of them goes to Needs Review whatever its band. New Jersey towns over 35 minutes stay out of area. Today `match_city` rejects any state other than PA before it checks town names, so it needs a small code change to accept NJ for the listed towns only. That change is made with WS3's JobFinder changes, so JobFinder code still only changes in WS1 to WS3 (Q2).
-6. **Career Navigator sorts them.** `_location_reason` (`eligibility.py:320`) passes a pass-band town with the reason "Philadelphia suburb, under 25 minutes by transit". A border town gets `review` with the reason "Philadelphia suburb near the 30 minute line". A New Jersey town gets `review` with the reason "New Jersey town near Philadelphia". The three lists live in `policy.py` next to `primary_cities` (`policy.py:33`). Town names match as whole words, so a town like Media doesn't match "social media".
-7. JobFinder's own digest shows border and New Jersey towns as normal matches. Only Career Navigator puts them in Needs Review.
+5. **New Jersey stays out (Q9).** The list has PA towns only. `match_city` already rejects any state other than PA, so New Jersey jobs stay out of area with no code change.
+6. **Career Navigator sorts them.** `_location_reason` (`eligibility.py:320`) passes a pass-band town with the reason "Philadelphia suburb, under 25 minutes by transit". A border town gets `review` with the reason "Philadelphia suburb near the 30 minute line". The two lists live in `policy.py` next to `primary_cities` (`policy.py:33`). Town names match as whole words, so a town like Media doesn't match "social media".
+7. JobFinder's own digest shows border towns as normal matches. Only Career Navigator puts them in Needs Review.
 
 ### Acceptance criteria
 - Tests: a pass-band town passes, a border town lands in Needs Review, a town over 35 minutes is out of area, and a word that only contains a town name doesn't match.
-- Tests: a listed New Jersey town lands in Needs Review even when it is under 25 minutes, and an unlisted New Jersey town is still rejected.
+- Tests: a New Jersey town, such as Camden, NJ, is still rejected.
 - Pittsburgh results are unchanged.
 - Existing tests pass.
 
 ### Dependencies and order
-After WS1. Can be built alongside WS3 and WS4. The list waits on Kyle's sign-off. The `match_city` change for New Jersey ships with WS3.
+After WS1. Can be built alongside WS3 and WS4. The list waits on Kyle's sign-off.
 
 ## Workstream 6: Two-week source comparison
 
@@ -207,7 +206,7 @@ Last. Starts two weeks after WS3 item 8.
 | A posting carries instructions aimed at Claude | The task does something it shouldn't | The task writes one file only, with a fixed shape, and JobFinder checks every field (WS2, WS3) |
 | A new source name or column reaches Career Navigator unannounced | The dashboard shows "jobfinder" or fails to load | WS4 lands before WS3 switches on the new sources, and no column changes |
 | Connector jobs crowd out email jobs | Kyle's picks shift toward whatever the connectors return | Same quotas for all sources. The two-week counts show it (WS6) |
-| Many results are suburbs or New Jersey | Lots of rejected rows and few real gains | Philadelphia suburbs under 30 minutes by transit now count, and nearby New Jersey towns go to Needs Review (WS5) |
+| Many results are suburbs or New Jersey | Lots of rejected rows and few real gains | Philadelphia suburbs in PA under 30 minutes by transit now count (WS5). New Jersey jobs are still rejected (Q9) |
 | A transit time in the town list is wrong | A job is kept or dropped by mistake | Kyle signs off on the list before it goes in, and towns near the line go to Needs Review (WS5) |
 | ZipRecruiter limit of 10 results per call | Thin results from ZipRecruiter | Account linked Nov 28 (Q6). The pull pages with `offset` up to a set number of pages per search |
 | A connector's terms limit automated use | The pull breaks a site's rules | Check both connectors' terms before WS2 starts **[unchecked]** (Q7) |
@@ -220,12 +219,12 @@ Last. Starts two weeks after WS3 item 8.
 | Q1 | On Nov 1 you limited sources to alert emails and pasted links. Is it OK to add the two connectors? | **Decided Nov 28: yes, both connectors, next to the email alerts** | Whole plan |
 | Q2 | Phase 3 ruled out changes to JobFinder's code, config or schedule. Phase 4 changes its code and `.gitignore` and adds a second scheduled task. Is that OK? | **Decided Nov 28: yes, limited to WS1, WS2 and WS3** | WS1, WS2, WS3 |
 | Q3 | Should JobFinder get a private GitHub repo, or stay local with git only? | **Decided Nov 28: private GitHub repo** | WS1 |
-| Q4 | Should suburbs and New Jersey count? Today only Pittsburgh and Philadelphia in PA pass. | **Decided Nov 28: Philadelphia suburbs count if they are under 30 minutes by transit to Center City. Border towns, 25 to 35 minutes, go to Needs Review. Pittsburgh stays as is** | WS5 |
+| Q4 | Should suburbs and New Jersey count? Today only Pittsburgh and Philadelphia in PA pass. | **Decided Nov 28: Philadelphia suburbs in PA count if they are under 30 minutes by transit to Center City. Border towns, 25 to 35 minutes, go to Needs Review. Pittsburgh stays as is** | WS5 |
 | Q5 | Career Navigator excludes food roles but JobFinder keeps them. Should the pull search food roles too? | **Decided Nov 28: yes.** The JobFinder digest stays the same as today, and Career Navigator still hides them | WS2 |
 | Q6 | Should you link your ZipRecruiter account to get more than 5 results per search? | **Decided Nov 28: yes. Linked the same day, and searches now return 10 per call** | WS2 |
 | Q7 | Should we follow Indeed's short links to get the real `jk=` job key? This may run against Indeed's terms. | **Decided Nov 28: no. Nothing in Phase 4 goes against Indeed's terms.** Use source plus `dup_key` instead | WS3 |
 | Q8 | JobsPipe is also connected and searches 30+ job boards, but each match costs a credit. Add it now? | **Decided Nov 28: no, not now** | Out of scope |
-| Q9 | Several New Jersey towns, such as Camden and Collingswood, are close to Center City on PATCO. Do they count under the same 30 minute rule? | **Decided Nov 28: no New Jersey jobs for now. Nearby New Jersey towns go to Needs Review** | WS5, WS3 |
+| Q9 | Several New Jersey towns, such as Camden and Collingswood, are close to Center City on PATCO. Do they count under the same 30 minute rule? | **Decided Nov 28: no. New Jersey jobs stay out of area, as today** | WS5 |
 
 ### Smaller defaults the build can settle (no decision needed from Kyle)
 - Pull time: 8:30 AM ET, 30 minutes before JobFinder's 9 AM run.
