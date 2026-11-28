@@ -2,7 +2,8 @@
 
 Hosts are validated with exact or dot-boundary checks only; lookalike domains
 are never trusted or rewritten. Provider ID precedence is deterministic
-(indeed: vjk before jk, independent of query order). Original URLs are always
+(indeed: vjk before jk, independent of query order). ZipRecruiter links keep
+their whole query, since the job is named only inside match_token. Original URLs are always
 retained as provenance; untrusted/unknown hosts are preserved verbatim.
 """
 import re
@@ -10,7 +11,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from .models import UrlIdentity
 
-_PROVIDERS = ("indeed.com", "linkedin.com")
+_PROVIDERS = ("indeed.com", "linkedin.com", "ziprecruiter.com")
 _LINKEDIN_JOB = re.compile(r"^/jobs/view/(\d+)/?$")
 
 
@@ -40,6 +41,11 @@ def canonical_url(url: str) -> UrlIdentity:
             urlencode({"jk": provider_id}) if provider_id else ""
         )
         canonical = f"{scheme}://{host}{path}" + (f"?{query}" if query else "")
+    elif provider == "ziprecruiter":
+        # The connector link names the job only inside match_token, so the query stays whole.
+        params = dict(parse_qsl(parts.query, keep_blank_values=True))
+        provider_id = params.get("listing_key") or None
+        canonical = f"{scheme}://{host}{path}" + (f"?{parts.query}" if parts.query else "")
     else:
         match = _LINKEDIN_JOB.match(path)
         provider_id = match.group(1) if match else None

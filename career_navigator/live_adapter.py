@@ -37,6 +37,10 @@ EXPECTED_SOURCE_RUNS_COLUMNS = frozenset(
 EXPECTED_STATE_COLUMNS = frozenset(
     "key value".split()
 )
+# JobFinder source names Career Navigator passes through. Any other name is served as "jobfinder".
+KNOWN_FEEDS = frozenset(
+    {"indeed_email", "linkedin_email", "manual", "indeed_connector", "ziprecruiter_connector"}
+)
 _JOB_SELECT = "SELECT " + ", ".join(sorted(EXPECTED_JOBS_COLUMNS)) + " FROM jobs ORDER BY id"
 _UPSTREAM_COLUMNS = (
     "id", "posted", "first_seen", "last_seen", "dupkey", "dup_of", "picked_on",
@@ -288,7 +292,7 @@ def load_live_database(path: str | Path, policy: Policy | None = None) -> LiveIm
         location = clean_text(_decode_text(record["location"], "location", row_id)).strip()
         details = clean_text(_decode_text(record["details"], "details", row_id)).strip()
         source = clean_text(_decode_text(record["source"], "source", row_id)).strip() or "jobfinder"
-        canonical_source = source if source in {"indeed_email", "linkedin_email", "manual"} else "jobfinder"
+        canonical_source = source if source in KNOWN_FEEDS else "jobfinder"
         pay_text = clean_text(_decode_text(record["pay_text"], "pay_text", row_id)).strip()
         # Parse with CN's parser as a validation/re-derivation step. Preserve sanitized
         # pay text in Posting; upstream pay_top remains provenance only.

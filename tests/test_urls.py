@@ -22,6 +22,24 @@ class CanonicalUrlTests(unittest.TestCase):
         self.assertEqual(a.provider_id, b.provider_id)
         self.assertEqual(a.url, b.url)
 
+    def test_ziprecruiter_link_keeps_whole_query(self):
+        url = "https://www.ziprecruiter.com/job-redirect?match_token=TOKEN123&tsid=T9"
+        r = canonical_url(url)
+        self.assertEqual(r.provider, "ziprecruiter")
+        self.assertTrue(r.trusted_host)
+        self.assertIsNone(r.provider_id)
+        self.assertEqual(r.url, url)
+        self.assertFalse(r.rewritten)
+
+    def test_ziprecruiter_listing_key_is_the_provider_id(self):
+        r = canonical_url("https://www.ziprecruiter.com/jobs/v2/x?listing_key=LK1&match_token=T")
+        self.assertEqual(r.provider_id, "LK1")
+
+    def test_ziprecruiter_lookalike_is_not_trusted(self):
+        r = canonical_url("https://ziprecruiter.com.evil.example/job-redirect?match_token=x")
+        self.assertFalse(r.trusted_host)
+        self.assertEqual(r.provider, "other")
+
     def test_lookalike_suffix_host_is_not_trusted(self):
         r = canonical_url("https://indeed.com.evil.example/viewjob?jk=x&utm_source=y")
         self.assertFalse(r.trusted_host)

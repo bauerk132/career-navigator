@@ -85,6 +85,39 @@ class ProvenanceTests(unittest.TestCase):
                 self.assertEqual(client.post("/api/refresh").status_code, 503)
                 self.assertEqual(client.get("/api/jobs").json()["snapshot_provenance"], provenance)
 
+    def test_connector_sources_pass_through(self):
+        with tempfile.TemporaryDirectory() as folder:
+            db = Path(folder) / "fixture.db"
+            stamp = "2026-11-19 08:45:00"
+            zip_url = ("https://www.ziprecruiter.com/job-redirect"
+                       "?match_token=SYNTHETIC_TOKEN&tsid=SYNTH")
+            rows = [
+                _row(1, "https://www.indeed.com/viewjob?jk=cccccccccccccccc",
+                     "IT Support Technician", "Acme", "Pittsburgh, PA", "Ticket support",
+                     "$24 an hour", source="indeed_connector"),
+                _row(2, zip_url, "Help Desk Technician", "Example", "Philadelphia, PA",
+                     "Ticket support", "$23 an hour", source="ziprecruiter_connector"),
+            ]
+            _write_db(db, rows, sources=(
+                ("indeed_connector", 1, 1, "", stamp),
+                ("ziprecruiter_connector", 1, 1, "", stamp),
+            ))
+            app = create_app(db_path=db, reload_interval=0,
+                             state_dir=Path(folder) / "state",
+                             tracker_path=FIXTURES / "job_tracker.csv")
+            with TestClient(app) as client:
+                jobs = client.get("/api/jobs").json()
+                by_id = {row["jobfinder_id"]: row for tier in ("shortlist", "review", "excluded")
+                         for row in jobs[tier]}
+                self.assertEqual(by_id[1]["contract"]["upstream_records"]["source"], "indeed_connector")
+                zip_row = by_id[2]["contract"]
+                self.assertEqual(zip_row["upstream_records"]["source"], "ziprecruiter_connector")
+                self.assertEqual(zip_row["source"]["provider"], "ziprecruiter")
+                self.assertTrue(zip_row["source"]["trusted_host"])
+                self.assertEqual(zip_row["source"]["url"], zip_url)
+                self.assertEqual(jobs["snapshot_provenance"]["source_runs"],
+                                 {"indeed_connector": stamp, "ziprecruiter_connector": stamp})
+
     def test_no_usable_run(self):
         with tempfile.TemporaryDirectory() as folder:
             db = Path(folder) / "fixture.db"
