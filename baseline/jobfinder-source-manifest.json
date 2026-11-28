@@ -1,115 +1,36 @@
 {
-  "repo": "C:\\Users\\kbaue\\Projects\\JobFinder",
-  "git_branch": "master",
-  "git_commits": 0,
-  "git_state": "all files untracked; no commits",
-  "note": "Read-only snapshot manifest of approved public source files. Private config/database/log/output files excluded by design.",
-  "file_count": 35,
+  "repo": "C:\\Users\\kbaue\\kepler\\worktrees\\default\\JobFi-phase-53671",
+  "git_branch": "phase4/jobfinder-connector-file",
+  "git_head": "2cdd4db427586b630a43fc03b9c3d3c97bd5d019",
+  "git_commits": 2,
+  "git_state": "clean",
+  "note": "Snapshot of JobFinder source files. Private configuration, runtime data, logs and ignored files are excluded.",
+  "file_count": 40,
   "files": [
     {
       "path": ".gitignore",
-      "sha256": "e19660f7e3ecf53a4331b441b6f4d9a98bd128796ee910b71088456e1a1ce391",
-      "bytes": 96
+      "sha256": "dba91d6a8a4c4d184b154767bba4d4fd835f5c738f36a2e4ea87f0e7a467e8ac",
+      "bytes": 251
     },
     {
       "path": "README.md",
-      "sha256": "eb15315838a45c30f3b5ce2de8346208ccf77ce5b9ce6e9c1a413b7206373baf",
-      "bytes": 7828
+      "sha256": "b24d98907c45c8acb13efcc32a14ce71c7f09304fbd23620aa160bedf6eaec15",
+      "bytes": 7962
     },
     {
       "path": "config.example.json",
-      "sha256": "9d8376d1e9294975648d3d52a47fc35e2734b57fd0c0f7c8cc34c8d5df36c547",
-      "bytes": 3879
+      "sha256": "e67b11c1b0ef591bd0b5bd61da60120be5310dbc7cebfaa7adee9f0ef7b1ebf8",
+      "bytes": 4062
     },
     {
-      "path": "requirements.txt",
-      "sha256": "e9302fde01b510d1432cb16fc59403ee7df9d4a8f551f1dafdec6167420edb09",
-      "bytes": 113
+      "path": "connector_searches.json",
+      "sha256": "5bbbc2913f2ab5908287b8a549b99191b23cee1736fe15e846d7a9017ed5b630",
+      "bytes": 380
     },
     {
-      "path": "requirements-dev.txt",
-      "sha256": "8004a972c3d5c274d8c808e8d8afe03b9aca8af8eebf3df4298f114d8008b754",
-      "bytes": 7
-    },
-    {
-      "path": "run_jobfinder.bat",
-      "sha256": "3d5b5275b5bac6113a7ae2a8cb575cf834023efd2708711e6b936bff04f5b7f2",
-      "bytes": 310
-    },
-    {
-      "path": "jobfinder/__init__.py",
-      "sha256": "d48d4b6107f223a64a02ce6d657ccf756cdd79df11b25b1cc3b5bc624e288b36",
-      "bytes": 121
-    },
-    {
-      "path": "jobfinder/__main__.py",
-      "sha256": "b86ee5b237a93d006e25740bbc3cef2dc42599f38054b61aa003959be343ddf6",
-      "bytes": 3427
-    },
-    {
-      "path": "jobfinder/config.py",
-      "sha256": "901ae375e63e9f922b3e854e9fb2854786293c6f2eb6cc2c9a529c5999d34ea9",
-      "bytes": 4934
-    },
-    {
-      "path": "jobfinder/dashboard.py",
-      "sha256": "f539d8554289b3157f1b993694f3cca31cdb8ed6923711f7c8ad52523ff592f9",
-      "bytes": 21386
-    },
-    {
-      "path": "jobfinder/filters.py",
-      "sha256": "6b8b88f84dd4a9eca84bd764731cb70206f7b2a2b6a2149988d7c51ef42539a0",
-      "bytes": 4194
-    },
-    {
-      "path": "jobfinder/gmail.py",
-      "sha256": "b88de36c29e20e194fb0bc5e88db98db467778574408af7437816ac766ab1b18",
-      "bytes": 1918
-    },
-    {
-      "path": "jobfinder/models.py",
-      "sha256": "5029a105dd5a61f89dead0255faf831074208a3de3433cac25ea370b3ead521b",
-      "bytes": 1967
-    },
-    {
-      "path": "jobfinder/normalize.py",
-      "sha256": "c5e47b37941500e9fc11b8042db728eca3c824b4516c0c4bd6c2329fba7d00ee",
-      "bytes": 5301
-    },
-    {
-      "path": "jobfinder/pipeline.py",
-      "sha256": "62eb845287c7f106c2aabc8b278f729fd1232af8e91cb1c792f1e53e280fc88b",
-      "bytes": 3069
-    },
-    {
-      "path": "jobfinder/ranking.py",
-      "sha256": "73bd4bb15e08818dd4fc36077e2e0a411dbe32112fdb06349e1f665ff0f92abb",
-      "bytes": 3981
-    },
-    {
-      "path": "jobfinder/sources/__init__.py",
-      "sha256": "9e83627c242845da65f56c4a412a79bd3c17143c840a9951dad62ae8b6b2886c",
-      "bytes": 1489
-    },
-    {
-      "path": "jobfinder/sources/indeed_email.py",
-      "sha256": "e271e0537f3e3441b9983dbf0561313d15fdda2af55d5d5d5822f4c6fbff0f5c",
-      "bytes": 7478
-    },
-    {
-      "path": "jobfinder/sources/linkedin_email.py",
-      "sha256": "4e553c47db306b39af4e2676713fdaa1904841721c3a2e3189424c85dde6fa3c",
-      "bytes": 4015
-    },
-    {
-      "path": "jobfinder/sources/manual.py",
-      "sha256": "6008f646268755c21e398f2d154982da7773b80c54e803e7e0a4ea5c82562577",
-      "bytes": 1588
-    },
-    {
-      "path": "jobfinder/storage.py",
-      "sha256": "b2ff1c43598b39cf11c65dbd98c7f0957251a031916dd69b29d1a2148bbe4d4e",
-      "bytes": 6149
+      "path": "docs/connector-file.md",
+      "sha256": "9678f1e26776d88b4e54720d3ac5e4e3e6b2a1e13fbdd2f52ecb9f62a5aad704",
+      "bytes": 2307
     },
     {
       "path": "job_finder/__init__.py",
@@ -118,68 +39,173 @@
     },
     {
       "path": "job_finder/filters.py",
-      "sha256": "ea39c99f74cdbf30f2da30de2ae2644da0980f122dbc4e8adcc5c10774342333",
-      "bytes": 2501
+      "sha256": "ad6a965bcac7cfcebf1ab7ef2273e3f835d1c84dc45e12a62a826a630c3514a9",
+      "bytes": 2580
+    },
+    {
+      "path": "jobfinder/__init__.py",
+      "sha256": "bb17fe66d991bbecae292b2bc738ecd384d97c1a84b8701553979263fe28f0da",
+      "bytes": 123
+    },
+    {
+      "path": "jobfinder/__main__.py",
+      "sha256": "63944c3b14630d6079242cf1e758d8bb0cb53fe456c565cffe28bda2af4f96d9",
+      "bytes": 3502
+    },
+    {
+      "path": "jobfinder/config.py",
+      "sha256": "60363241b530ab4d9e0185ac000b0bdd9ede4420c12e583cc2eb2cc572f73adb",
+      "bytes": 5045
+    },
+    {
+      "path": "jobfinder/dashboard.py",
+      "sha256": "6e75e7ac82b4ac650cccc2fd57431f4b2b0f698a01f33420047be0db09b48847",
+      "bytes": 21826
+    },
+    {
+      "path": "jobfinder/filters.py",
+      "sha256": "cb98442dde78b7f8e5e37532184ec3c6934b1be2ed4034f8b9d0dc5c2e7519e3",
+      "bytes": 4296
+    },
+    {
+      "path": "jobfinder/gmail.py",
+      "sha256": "f36b3a4c8022e10c8de0601bb3405a52089c3d0bb9ce8b6c232448b91098ed2b",
+      "bytes": 2634
+    },
+    {
+      "path": "jobfinder/models.py",
+      "sha256": "42715a89ce5a7367c12d3d8e1ca4ce30745e93063b281cef88187b471645bf9b",
+      "bytes": 2107
+    },
+    {
+      "path": "jobfinder/normalize.py",
+      "sha256": "f4327add8b4917e9b20069025e89d4c8c62df8b44928e18a6bc9686aaa722a92",
+      "bytes": 5437
+    },
+    {
+      "path": "jobfinder/pipeline.py",
+      "sha256": "17b39ac902cc443f2bba6f71810b574b949bb0147d5aac4010cc506b6df97997",
+      "bytes": 3145
+    },
+    {
+      "path": "jobfinder/ranking.py",
+      "sha256": "c45e79010b32a04419d9b569d5c23b84e3eebe1470923bf1a419ebfc953c8873",
+      "bytes": 4074
+    },
+    {
+      "path": "jobfinder/sources/__init__.py",
+      "sha256": "ab45723ed4ceacefaf1ab21deb6c4895d24622192a1d074185321090cafcb503",
+      "bytes": 1666
+    },
+    {
+      "path": "jobfinder/sources/connector_file.py",
+      "sha256": "336f459f802c9ca715e32baee0a5d496bd084a683907c668ed8bee17a50c8a81",
+      "bytes": 4189
+    },
+    {
+      "path": "jobfinder/sources/indeed_email.py",
+      "sha256": "5c869034dae456f47c70ec143bb2ae15d021c12a385616c03cba5c0f08e7d1d2",
+      "bytes": 7661
+    },
+    {
+      "path": "jobfinder/sources/linkedin_email.py",
+      "sha256": "21b5188e7fc927db22b958a8a4a27766add732f5bcf83cc2cafdbd1ce99eae45",
+      "bytes": 4105
+    },
+    {
+      "path": "jobfinder/sources/manual.py",
+      "sha256": "a839b963d171b8638a665025447fc5a53f402eb6f452942b2a43546a21d2774c",
+      "bytes": 1634
+    },
+    {
+      "path": "jobfinder/storage.py",
+      "sha256": "605653670fb327568448e1e68d6fef2e6bac0ed9d8e62ff13e29815d53f7e0f5",
+      "bytes": 7465
+    },
+    {
+      "path": "requirements-dev.txt",
+      "sha256": "aa9ecf0e3f7c6cb776fe2dbbfad2d8149c4af75796e875a22efb895d95f98c99",
+      "bytes": 8
+    },
+    {
+      "path": "requirements.txt",
+      "sha256": "4ec2fdd8009eb39832ed94b46f742de0b6037ff30a1b7065e9c70ddea5c23b6b",
+      "bytes": 115
+    },
+    {
+      "path": "run_jobfinder.bat",
+      "sha256": "3d5b5275b5bac6113a7ae2a8cb575cf834023efd2708711e6b936bff04f5b7f2",
+      "bytes": 310
     },
     {
       "path": "tests/conftest.py",
-      "sha256": "b7591a1378237f67365b70d26f8c4eb503f4d6edd5e4b49503f8779152d452ca",
-      "bytes": 1335
+      "sha256": "af90a879420a092aee893fc6adb7d80f8249e1bad34f4fdc3b5cdcbc27b2d36b",
+      "bytes": 1375
+    },
+    {
+      "path": "tests/fixtures/connector_jobs.json",
+      "sha256": "ea0e5dcb126e2b6b93b65bd087c5192b15034fe166a1465998342084f5979526",
+      "bytes": 1530
     },
     {
       "path": "tests/fixtures/indeed_alert.html",
-      "sha256": "3a5efe929267308e1a8ef0dc284f6de8a699d6fae75e83b78f15c5e552ca7888",
-      "bytes": 4749
+      "sha256": "6f84bce2fd0b5d7d60bc43ab3a14b9922d427caf0052f875fa475de66c3484b3",
+      "bytes": 4847
     },
     {
       "path": "tests/fixtures/indeed_newer_layouts.html",
-      "sha256": "887c0c06bd79010470408d6eebc0f852e99635f2533e43f8ab33080df13fa576",
-      "bytes": 1495
+      "sha256": "befd7c5acf5903c5fc0961afe71e6f1ceb83b27318d185751ae9a039998c6adf",
+      "bytes": 1518
     },
     {
       "path": "tests/fixtures/linkedin_alert.html",
-      "sha256": "47f0e46341bdb0c9c3f462789e707cc16ef4e5ba99b472e5bbcdc9fd5c6ccdcf",
-      "bytes": 1354
+      "sha256": "99b361a81576fdc6daf91217d6479e21b414d71b24797855d1db2576c107e3c1",
+      "bytes": 1385
     },
     {
       "path": "tests/fixtures/linkedin_alert_real_layout.html",
-      "sha256": "9eda0b2d9e7b6c032b46566a13f7b08853a80d0f199e37688063cf6480425532",
-      "bytes": 1644
+      "sha256": "0a5eac8c12809a1c0e8646c3e16dccb00de00990f19557b6f5541709165f953a",
+      "bytes": 1665
+    },
+    {
+      "path": "tests/fixtures/manual_jobs.txt",
+      "sha256": "180ef7b5ab7deb5a196d61e6a377705e0526a08ec1facad3167ee4188677b0cb",
+      "bytes": 438
+    },
+    {
+      "path": "tests/test_connector_file.py",
+      "sha256": "70bff5637410af56807b9fcf66c35f9756a98f434e08640622504971d2e736cd",
+      "bytes": 6933
     },
     {
       "path": "tests/test_dashboard.py",
-      "sha256": "8cd9ddbbda7e49d9b94e2adb4524745671435bdcf5ac52d6fcc47a35a2a92d33",
-      "bytes": 4825
+      "sha256": "cd02a43d6241168d33b25ad522a094b3b1b56f6b98299aeacdf285998d309bb5",
+      "bytes": 4926
     },
     {
       "path": "tests/test_filters.py",
-      "sha256": "759b13c29a7f7656a369ea8cd1e08c1124cedf2d952cd2f8ed2a5e11f5530bc4",
-      "bytes": 4645
+      "sha256": "18c778b2c3361b21a500684e3da27fa5e58781393f7342b7c33542035be28cdf",
+      "bytes": 4761
     },
     {
       "path": "tests/test_normalize.py",
-      "sha256": "c2c7a07408f79849d71f814505baf87566094b81b216c1a448202b62e336f4b7",
-      "bytes": 3497
+      "sha256": "13adb6edeb9c4a34a1029ecc0395008be2a19db5dd95f82cd759f69f55f9bba7",
+      "bytes": 3578
     },
     {
       "path": "tests/test_pipeline.py",
-      "sha256": "eb7a0b1b2ee22daaaa822092573576f05407a4a78ef5fe9d2d0f2771db8a1077",
-      "bytes": 7259
+      "sha256": "29538afad5e6222b16b0ccd98566268476569cf8f522ce6609012b576aca21cf",
+      "bytes": 7418
     },
     {
       "path": "tests/test_ranking.py",
-      "sha256": "5f5c1dbf304ce0654db091c7757ae4249f0f6d7373f06b68c7ca6633702d7712",
-      "bytes": 3519
+      "sha256": "8b11d0242cc11a88a40d67ace2ac818cec833cbb770f226f6a97bc8aa90dfbfd",
+      "bytes": 3592
     },
     {
       "path": "tests/test_sources.py",
-      "sha256": "c77091b35e34ae4096680ef823ba362ceaa19b089ed0d3c942683aafc53f7caa",
-      "bytes": 7923
-    },
-    {
-      "path": "docs/reviews/JobFinder-Claude-Review-2026-10-31.md",
-      "sha256": "d2d6c5794509ee15e649791cec51a748df7816517315f53ed064cdbce7549746",
-      "bytes": 21480
+      "sha256": "443c3d511e3a653d928b072e260e61bbbc236adf5951d45d1e18b6bbf8cd0a37",
+      "bytes": 10738
     }
   ]
 }
