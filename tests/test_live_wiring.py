@@ -33,6 +33,13 @@ from career_navigator.live_adapter import (
 )
 from career_navigator.policy import Policy
 
+# Live-mode apps default their decision log to ~/career-navigator-state. Point
+# every test that imports this module (test_freshness and
+# test_duplicate_resolutions do too) at a throwaway folder so a real
+# decisions file can never change what these tests see.
+_TEST_STATE_DIR = tempfile.mkdtemp(prefix="cn-test-state-")
+os.environ["CN_STATE_DIR"] = _TEST_STATE_DIR
+
 FIXTURES = Path(__file__).parent / "fixtures"
 SCHEMA = FIXTURES / "jobfinder_schema.sql"
 PAY = {"eligible": "$25 an hour", "review": "", "rejected": "$10 an hour"}

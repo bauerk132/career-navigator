@@ -7,6 +7,7 @@ provenance; Career Navigator remains the decision authority.
 """
 from __future__ import annotations
 
+import hashlib
 import math
 import sqlite3
 from dataclasses import dataclass
@@ -14,13 +15,14 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .dedup import group_duplicates
+from .duplicate_resolutions import group_fingerprint
 from .eligibility import evaluate
 from .models import Decision, Posting, Reason
 from .pay import parse_pay
 from .pipeline import Evaluation
 from .policy import Policy
 from .relevance import score
-from .text import clean_text
+from .text import clean_text, make_excerpt
 from .urls import canonical_url
 
 EXPECTED_USER_VERSION = 0
@@ -286,6 +288,7 @@ def load_live_database(path: str | Path, policy: Policy | None = None) -> LiveIm
         location = clean_text(_decode_text(record["location"], "location", row_id)).strip()
         details = clean_text(_decode_text(record["details"], "details", row_id)).strip()
         source = clean_text(_decode_text(record["source"], "source", row_id)).strip() or "jobfinder"
+        canonical_source = source if source in {"indeed_email", "linkedin_email", "manual"} else "jobfinder"
         pay_text = clean_text(_decode_text(record["pay_text"], "pay_text", row_id)).strip()
         # Parse with CN's parser as a validation/re-derivation step. Preserve sanitized
         # pay text in Posting; upstream pay_top remains provenance only.
@@ -301,6 +304,8 @@ def load_live_database(path: str | Path, policy: Policy | None = None) -> LiveIm
                 upstream[name] = _parse_optional_float(val, name, row_id)
 
         upstream.update({
+            "source": canonical_source,
+            "details_excerpt": make_excerpt(details),
             "url": url,
             "canonical_url": identity.url,
             "provider": identity.provider,
@@ -320,6 +325,11 @@ def load_live_database(path: str | Path, policy: Policy | None = None) -> LiveIm
         )
         decision = evaluate(posting, active_policy)
         upstream["cn_assessment"] = {
+            # Phase 3c WS7: a hash of the posting text the location/driving
+            # rules read, so a saved review decision can tell when the posting
+            # text changed. Provenance only; no rule reads it.
+            "details_fp": hashlib.sha256(
+                " ".join(details.split()).casefold().encode("utf-8")).hexdigest()[:16],
             "status": decision.status,
             "reasons": tuple((reason.factor, reason.outcome, reason.evidence)
                              for reason in decision.reasons),
@@ -342,6 +352,18 @@ def load_live_database(path: str | Path, policy: Policy | None = None) -> LiveIm
                     member == representative,
                 )
         else:
+            if group.confidence == "uncertain":
+                # Expose the group, don't change it (Phase 3c WS5): each member
+                # carries the group fingerprint and every member's JobFinder id
+                # so a decision can be recorded against exactly this group.
+                member_ids = [upstream_by_posting[m].get("id") for m in group.members]
+                if all(isinstance(i, int) for i in member_ids):
+                    dup_group = {
+                        "fingerprint": group_fingerprint(member_ids),
+                        "member_ids": sorted(member_ids),
+                    }
+                    for member in group.members:
+                        upstream_by_posting[member]["dup_group"] = dup_group
             for member in group.members:
                 group_info[member] = (group.confidence, group.reason, 1, True)
     imported = tuple(

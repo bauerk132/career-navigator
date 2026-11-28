@@ -17,17 +17,60 @@ stale: true in the envelope.
 Run: uvicorn career_navigator.app:app --host 127.0.0.1 --port 8000
 """
 import hashlib
+import json
 import os
+import re
+import threading
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
+from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from typing import Literal
+
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
 
+from . import freshness
 from .adapters import default_source_path, load_postings
+from .applications import (
+    TEXT_MAX as APPLICATION_TEXT_MAX,
+    ApplicationError,
+    ApplicationState,
+    Applications,
+    build_board,
+    category_label,
+    export_rows,
+    export_token,
+    write_export,
+)
+from .tracker_adapter import (
+    PRIVATE_COLUMNS,
+    STATUSES as TRACKER_STATUSES,
+    TrackerError,
+    file_signature as tracker_signature,
+    load_tracker,
+    parse_date,
+    resolve_tracker_path,
+)
 from .contracts import CURRENT_PAY_HOURLY
+from .duplicate_resolutions import (
+    DuplicateResolutions,
+    ResolutionError,
+    ResolutionState,
+    build_served_view,
+    group_lookup,
+)
+from .freshness import parse_eastern
+from .review_decisions import (
+    REASONS as REVIEW_REASONS,
+    ReviewDecisions,
+    ReviewError,
+    ReviewState,
+    build_review_view,
+)
 from .live_adapter import (
     LiveAdapterError,
     evaluate_live_import,
@@ -37,6 +80,8 @@ from .live_adapter import (
 from .pipeline import evaluate_postings
 from .policy import SALARY_FLOOR_HOURLY, Policy
 from .ranking import RankedResult, rank_evaluations
+from .state_store import StateError, resolve_state_dir
+from .state_tools import backup_if_due
 
 _LOCAL_ORIGINS = (
     "http://localhost:5173",
@@ -47,8 +92,16 @@ _LOCAL_ORIGINS = (
 
 # Staleness threshold for /api/stats (S3): a refresh older than this is stale.
 _STALE_THRESHOLD_HOURS = 26.0
-# JobFinder timestamps are naive US Eastern local time (S3/F-03).
-_EASTERN = ZoneInfo("America/New_York")
+# Keys of the /api/gate response. The report body is never returned.
+_GATE_RESPONSE_KEYS = frozenset({
+    "available", "file", "date", "verdict", "finished_at",
+    "hard_failures", "soft_failures", "checks", "error",
+})
+# Consecutive failed watcher probes before the freshness block reports degraded.
+_PROBE_FAILURE_LIMIT = 3
+# A real gate report is a few KB; refuse anything bigger rather than load it.
+_GATE_REPORT_MAX_BYTES = 1_000_000
+_GATE_REPORT_RE = re.compile(r"^live_gate_report\.(\d{4}-\d{2}-\d{2})\.json$")
 
 
 def job_id(source: dict) -> str:
@@ -89,13 +142,46 @@ def _ranked_result_to_dict(result: RankedResult) -> dict:
         "duplicate_reason": duplicates.get("reason", ""),
         "exact_duplicate_count": upstream.get("exact_duplicate_count", 1),
         "upstream_verdict": upstream.get("verdict"),
+        # Phase 3c WS5: the decision in force for this posting's uncertain
+        # group (keep / merge / dismiss), or None. Raw duplicate_confidence
+        # above is never changed by a decision.
+        "duplicate_resolution": upstream.get("duplicate_resolution"),
+        # Phase 3c WS7: on a Needs Review posting, the per-reason state of
+        # Kyle's review decisions (open / pass / reject / changed) and the
+        # status the posting is served under after them. cn_status above is
+        # always the raw policy status. None for rows that were never in review.
+        "review_decision": upstream.get("review_decision"),
     }
 
 
-def _totals(snapshot: dict) -> dict:
+def _snapshot_provenance(snapshot: dict) -> dict:
+    health = snapshot.get("health") or {}
+    sources = {}
+    for item in health.get("sources") or []:
+        name = item.get("name")
+        ran_at = item.get("ran_at")
+        if name and ran_at:
+            # Only expose canonical feed IDs; never leak arbitrary DB values.
+            if name in {"indeed_email", "linkedin_email", "manual"}:
+                try:
+                    parsed = parse_eastern(ran_at)
+                    if parsed is None:
+                        continue
+                except (TypeError, ValueError):
+                    continue
+                sources[name] = ran_at
+    return {
+        "loaded_at": snapshot["refreshed_at"],
+        "source_runs_status": "available" if sources else "unavailable",
+        "source_runs": sources,
+    }
+
+
+def _totals(snapshot: dict, ranked=None) -> dict:
     # Takes the snapshot bound once by the endpoint (C-N4) so a /api/refresh
     # interleaving mid-request can never mix generations inside one response.
-    ranked = snapshot["ranked"]
+    # ``ranked`` is the served view (decisions applied); default is the raw ranking.
+    ranked = ranked if ranked is not None else snapshot["ranked"]
     return {
         "shortlist": len(ranked.shortlist),
         "review": len(ranked.review),
@@ -112,10 +198,12 @@ def _index(ranked) -> dict:
     }
 
 
-def _exact_duplicate_count_sum(snapshot: dict) -> int:
+def _exact_duplicate_count_sum(snapshot: dict, ranked=None) -> int:
     """Reconciliation invariant (S2): summed over all served postings, the
-    exact_duplicate_count values must equal the raw ingested row count."""
-    ranked = snapshot["ranked"]
+    exact_duplicate_count values must equal the raw ingested row count.
+    Merged duplicates add their folded rows to the kept row's count, so the
+    invariant holds with decisions applied too."""
+    ranked = ranked if ranked is not None else snapshot["ranked"]
     total = 0
     for group in (ranked.shortlist, ranked.review, ranked.excluded):
         for result in group:
@@ -124,35 +212,9 @@ def _exact_duplicate_count_sum(snapshot: dict) -> int:
     return total
 
 
-def _parse_eastern_timestamp(value):
-    """Parse a JobFinder timestamp into an aware datetime.
-
-    JobFinder stores naive US Eastern local time ("2026-11-19 09:00" or
-    ISO "2026-11-20T09:00:04"); a value that already carries an offset is
-    used as-is. Returns None when the value is missing or unparseable.
-    """
-    if value is None:
-        return None
-    text = str(value).strip()
-    if not text:
-        return None
-    parsed = None
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError:
-        parsed = None
-    if parsed is None:
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
-            try:
-                parsed = datetime.strptime(text, fmt)
-                break
-            except ValueError:
-                continue
-    if parsed is None:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=_EASTERN)
-    return parsed
+# JobFinder timestamps are naive US Eastern local time (S3/F-03). The parser
+# lives in freshness.py; the old name stays importable from here.
+_parse_eastern_timestamp = parse_eastern
 
 
 def _staleness(health: dict) -> dict:
@@ -181,13 +243,24 @@ def _staleness(health: dict) -> dict:
     }
 
 
+def _file_mtime(path) -> float | None:
+    try:
+        return os.stat(path).st_mtime
+    except OSError:
+        return None
+
+
 def _reload(app: FastAPI) -> None:
     policy = app.state.policy
     if app.state.db_path is not None:
+        # mtime is taken before the read so a write during the load is seen
+        # as a change by the next watcher tick.
+        db_mtime = _file_mtime(app.state.db_path)
         live_import = load_live_database(app.state.db_path, policy)
         ranked = rank_evaluations(evaluate_live_import(live_import, policy), policy)
         health = dict(live_import.health)
         health["degraded"] = False
+        health["db_mtime"] = db_mtime
         # One snapshot object, swapped in a single assignment (C-N2): a
         # concurrent refresh+read can never mix generations.
         app.state.snapshot = {
@@ -216,22 +289,470 @@ def _ensure_loaded(app: FastAPI) -> None:
         _reload(app)
 
 
+def _served_view(app: FastAPI, snapshot: dict):
+    """The snapshot with Kyle's duplicate decisions applied (Phase 3c WS5).
+
+    The raw snapshot is never modified. The overlay is rebuilt only when the
+    snapshot object or the decisions file changes. A damaged or unreadable
+    decisions file is reported (store.error) and the raw ranking is served,
+    never silently hidden: the dashboard shows the error."""
+    resolutions = app.state.resolutions
+    store = {"enabled": resolutions.enabled, "events": 0, "skipped_lines": 0, "error": None}
+    try:
+        state = resolutions.state()
+    except StateError as exc:
+        store["error"] = str(exc)
+        state = None
+    reviews = app.state.reviews
+    review_store = {"enabled": reviews.enabled, "events": 0, "skipped_lines": 0, "error": None}
+    try:
+        review_state = reviews.state()
+    except StateError as exc:
+        review_store["error"] = str(exc)
+        review_state = None
+    signature = (
+        (state.signature, state.event_count) if state is not None else ("error", store["error"]),
+        (review_state.signature, review_state.event_count) if review_state is not None
+        else ("error", review_store["error"]),
+    )
+    cached = app.state.view_cache
+    if cached is not None and cached[0] is snapshot and cached[1] == signature:
+        return cached[2]
+    if state is None:
+        state = ResolutionState({}, 0, 0, None)
+    else:
+        store["events"] = state.event_count
+        store["skipped_lines"] = state.skipped
+    if review_state is None:
+        review_state = ReviewState({}, 0, 0, None)
+    else:
+        review_store["events"] = review_state.event_count
+        review_store["skipped_lines"] = review_state.skipped
+    view = build_served_view(
+        snapshot["ranked"], state, lambda source: job_id(source), store_info=store,
+    )
+    # Review decisions go on top of the duplicate overlay (WS7). A row folded
+    # away by a duplicate merge is not in these lists, so it is never reviewed.
+    review_view = build_review_view(
+        view.ranked, review_state, app.state.policy, lambda source: job_id(source),
+        store_info=review_store,
+    )
+    view = replace(view, ranked=review_view.ranked, index=review_view.index, review=review_view)
+    app.state.view_cache = (snapshot, signature, view)
+    return view
+
+
 def _is_degraded(snapshot: dict) -> bool:
     return bool((snapshot.get("health") or {}).get("degraded"))
 
 
-def create_app(source_path=None, policy=None, db_path=None) -> FastAPI:
+def _safe_reload(app: FastAPI) -> tuple[bool, str | None]:
+    """Reload under app.state.reload_lock, keeping the last good snapshot.
+
+    Live mode with a snapshot in place: a LiveAdapterError keeps the old
+    snapshot, marks its health degraded, and returns (False, message).
+    Otherwise the reload runs directly and any error propagates (fail closed
+    at startup, when there is nothing to keep).
+    """
+    with app.state.reload_lock:
+        if app.state.db_path is not None and app.state.snapshot is not None:
+            try:
+                _reload(app)
+            except LiveAdapterError as exc:
+                snapshot = app.state.snapshot
+                health = snapshot.get("health") or {}
+                health["degraded"] = True
+                health["last_error"] = str(exc)
+                health["error_time"] = datetime.now(timezone.utc).isoformat()
+                snapshot["health"] = health
+                return False, str(exc)
+            return True, None
+        _reload(app)
+        return True, None
+
+
+def _watch_once(app: FastAPI) -> str:
+    """One watcher tick. Returns a short status string (see tests).
+
+    Probes jobfinder.db read-only. A probe error is not degradation (the DB
+    may be locked mid-run). A change in mtime or state.last_updated triggers
+    a reload unless the scheduled task is running, in which case the reload
+    waits for the next tick.
+    """
+    if app.state.db_path is None:
+        return "synthetic"
+    probe = freshness.probe_db(app.state.db_path)
+    app.state.last_probe = probe
+    if probe["error"]:
+        # One failure is silent (the DB may be locked mid-run); a run of them
+        # is surfaced by _freshness_block as degraded.
+        app.state.consecutive_probe_failures += 1
+        return "probe-error"
+    app.state.consecutive_probe_failures = 0
+    health = (app.state.snapshot or {}).get("health") or {}
+    changed = (
+        probe["mtime"] != health.get("db_mtime")
+        or probe["last_updated"] != health.get("last_updated")
+    )
+    if not changed:
+        return "unchanged"
+    if app.state.task_check() is True:
+        return "task-running"
+    ok, error = _safe_reload(app)
+    if ok:
+        app.state.auto_reload_error = None
+        app.state.last_auto_reload = datetime.now(timezone.utc).isoformat()
+        return "reloaded"
+    app.state.auto_reload_error = error
+    return "reload-failed"
+
+
+def _backup_state(app: FastAPI) -> None:
+    """Take today's backup of career-navigator.db (live mode only). A
+    failure is recorded, never fatal."""
+    if app.state.db_path is None or app.state.state_dir is None:
+        return
+    try:
+        made = backup_if_due(app.state.state_dir)
+    except Exception as exc:  # a backup problem must never stop the backend
+        app.state.backup_error = f"{type(exc).__name__}: {exc}"
+        return
+    app.state.backup_error = None
+    if made is not None:
+        app.state.last_backup = str(made)
+
+
+def _watch_loop(app: FastAPI, interval: float, stop: threading.Event) -> None:
+    while not stop.wait(interval):
+        _backup_state(app)
+        try:
+            _watch_once(app)
+        except Exception as exc:  # the watcher must never die silently
+            app.state.auto_reload_error = f"{type(exc).__name__}: {exc}"
+
+
+def _freshness_block(app: FastAPI, snapshot: dict) -> dict:
+    health = snapshot.get("health") or {}
+    snapshot_degraded = _is_degraded(snapshot)
+    probe_degraded = app.state.consecutive_probe_failures >= _PROBE_FAILURE_LIMIT
+    probe_error = None
+    if probe_degraded:
+        probe_error = str((app.state.last_probe or {}).get("error") or "unknown error")[:200]
+    block = freshness.classify(
+        health.get("last_updated"),
+        sources=health.get("sources"),
+        db_last_updated=(app.state.last_probe or {}).get("last_updated"),
+        degraded=snapshot_degraded or probe_degraded,
+    )
+    if probe_degraded:
+        if not snapshot_degraded:
+            # Drop classify's generic "failed reload" reason; it is not what happened.
+            block["reasons"] = [r for r in block["reasons"]
+                                if not r.startswith("live backend is serving the last good snapshot")]
+        block["reasons"].append(f"cannot read jobfinder.db: {probe_error}")
+    block["probe_error"] = probe_error
+    block["loaded_at"] = snapshot["refreshed_at"]
+    block["rows"] = health.get("jobs_count")
+    block["watch_interval_seconds"] = app.state.reload_interval
+    return block
+
+
+def _read_gate_summary(reports_dir: str | None) -> dict:
+    """Summarize the newest dated live gate report, for /api/gate.
+
+    Report keys mapped (live_gate.py finalize() writes these; the report has
+    no soft_failures key, so it is derived):
+      verdict        <- report["verdict"]; anything other than PASS/FAIL is UNKNOWN
+      finished_at    <- report["finished_at"] (ISO string, or null)
+      hard_failures  <- len(report["hard_failures"]) (a list of check names);
+                        when absent, count checks with hard=True and passed=False
+      soft_failures  <- count of checks with hard=False and passed=False
+      checks         <- len(report["checks"])
+      date           <- the YYYY-MM-DD in the file name (ET date of the run)
+    Only the keys in _GATE_RESPONSE_KEYS are returned; the body is never
+    returned. An unreadable or malformed report yields verdict UNKNOWN with
+    an error message.
+    """
+    if not reports_dir or not Path(reports_dir).is_dir():
+        return {"available": False}
+    dated = []
+    try:
+        for entry in Path(reports_dir).iterdir():
+            match = _GATE_REPORT_RE.match(entry.name)
+            if match and entry.is_file():
+                dated.append((match.group(1), entry.name))
+    except OSError:
+        return {"available": False}
+    if not dated:
+        return {"available": False}
+    date, name = max(dated)
+    try:
+        path = Path(reports_dir) / name
+        if path.stat().st_size > _GATE_REPORT_MAX_BYTES:
+            raise ValueError("report too large")
+        report = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(report, dict):
+            raise ValueError("report is not an object")
+    except (OSError, ValueError, RecursionError):
+        return {"available": True, "file": name, "date": date,
+                "verdict": "UNKNOWN", "error": "unreadable report"}
+    raw_checks = report.get("checks") if isinstance(report.get("checks"), list) else []
+    checks = [c for c in raw_checks if isinstance(c, dict)]
+    hard_list = report.get("hard_failures")
+    if isinstance(hard_list, list):
+        hard_count = len(hard_list)
+    else:
+        hard_count = sum(1 for c in checks if c.get("hard") and c.get("passed") is False)
+    soft_count = sum(1 for c in checks if not c.get("hard") and c.get("passed") is False)
+    verdict = report.get("verdict")
+    finished = report.get("finished_at")
+    summary = {
+        "available": True,
+        "file": name,
+        "date": date,
+        "verdict": verdict if verdict in ("PASS", "FAIL") else "UNKNOWN",
+        "finished_at": finished if isinstance(finished, str) else None,
+        "hard_failures": hard_count,
+        "soft_failures": soft_count,
+        "checks": len(raw_checks),
+    }
+    return {k: v for k, v in summary.items() if k in _GATE_RESPONSE_KEYS}
+
+
+_FINGERPRINT_RE = re.compile(r"^[0-9a-f]{16}$")
+
+
+class DuplicateEventBody(BaseModel):
+    """One write to duplicate_resolutions.jsonl. Only these fields, only
+    these event types; anything else is refused (422)."""
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["resolve", "undo"]
+    action: Literal["keep", "merge", "dismiss"] | None = None
+    kept_jobfinder_id: int | None = None
+    note: str | None = Field(default=None, max_length=500)
+
+
+_API_ID_RE = re.compile(r"^[0-9a-f]{12}$")
+
+
+class ReviewEventBody(BaseModel):
+    """One write to review_decisions.jsonl. Only these fields, only these event
+    types; anything else is refused (422)."""
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["decide", "undo"]
+    reason: Literal["pay", "location", "driving"]
+    verdict: Literal["pass", "reject"] | None = None
+    note: str | None = Field(default=None, max_length=500)
+
+
+class ApplicationEventBody(BaseModel):
+    """One write to applications.jsonl from the board. Only these fields;
+    anything else is refused (422). Which fields a type needs is checked in
+    the route."""
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["move", "next_step", "follow_up", "note", "unlink", "undo"]
+    status: str | None = Field(default=None, max_length=40)
+    text: str | None = Field(default=None, max_length=APPLICATION_TEXT_MAX["note"])
+    date: str | None = Field(default=None, max_length=10)
+    event_id: str | None = Field(default=None, max_length=64)
+
+
+class TrackBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ExportBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    token: str = Field(min_length=16, max_length=16)
+
+
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1"})
+
+
+def _is_local_client(request: Request) -> bool:
+    """confirmation_number and notes are served only to a client on this machine."""
+    client = request.client
+    return client is not None and client.host in _LOOPBACK_HOSTS
+
+
+def _public_card(card: dict, local: bool) -> dict:
+    if local:
+        return card
+    stripped = dict(card)
+    for column in PRIVATE_COLUMNS:
+        stripped[column] = None
+    stripped["cn_notes"] = [{k: v for k, v in n.items() if k != "text"} for n in card["cn_notes"]]
+    stripped["private_hidden"] = True
+    return stripped
+
+
+def _tracker(app: FastAPI):
+    """(TrackerImport or None, error or None), re-read only when the file changes."""
+    path = app.state.tracker_path
+    if path is None:
+        return None, None
+    signature = tracker_signature(path)
+    cached = app.state.tracker_cache
+    if cached is not None and cached[0] == signature and signature is not None:
+        return cached[1], cached[2]
+    try:
+        tracker, error = load_tracker(path), None
+    except TrackerError as exc:
+        tracker, error = None, str(exc)
+    app.state.tracker_cache = (signature, tracker, error)
+    return tracker, error
+
+
+def _board(app: FastAPI):
+    """(board, tracker, application state, store info, tracker error)."""
+    _ensure_loaded(app)
+    view = _served_view(app, app.state.snapshot)
+    tracker, tracker_error = _tracker(app)
+    applications = app.state.applications
+    store = {"enabled": applications.enabled, "events": 0, "skipped_lines": 0, "error": None}
+    try:
+        state = applications.state()
+    except StateError as exc:
+        store["error"] = str(exc)
+        state = ApplicationState({}, (), 0, 0, ("error", store["error"]))
+    store["events"] = state.event_count
+    store["skipped_lines"] = state.skipped
+    key = (id(view), tracker.sha256 if tracker else tracker_error, state.signature,
+           state.event_count, parse_date(datetime.now().date().isoformat())[0])
+    cached = app.state.board_cache
+    if cached is not None and cached[0] == key and cached[1] is view:
+        return cached[2], tracker, state, store, tracker_error
+    postings = list(view.index.values()) + list(getattr(view, "folded", {}).values())
+    board = build_board(tracker, state, postings, job_id)
+    app.state.board_cache = (key, view, board)
+    return board, tracker, state, store, tracker_error
+
+
+_APPLICATION_FIELDS = {
+    "move": {"status"},
+    "next_step": {"text"},
+    "follow_up": {"date"},
+    "note": {"text"},
+    "unlink": set(),
+    "undo": {"event_id"},
+}
+
+
+def _application_event(card: dict, body: "ApplicationEventBody") -> dict:
+    """Turn a board request into an event for this card. Ids, keys and the
+    matched JobFinder id come from the backend's own board, never the client."""
+    given = {f for f in ("status", "text", "date", "event_id") if getattr(body, f) is not None}
+    extra = given - _APPLICATION_FIELDS[body.type]
+    if extra:
+        raise ApplicationError(f"{body.type} does not take {', '.join(sorted(extra))}")
+    event = {"type": body.type, "app_key": card["app_key"]}
+    if body.type == "move":
+        if body.status not in TRACKER_STATUSES:
+            raise ApplicationError(f"status must be one of {', '.join(TRACKER_STATUSES)}")
+        if body.status == card["status"]:
+            raise ApplicationError(f"this card is already {body.status}", status=409)
+        event["status"] = body.status
+    elif body.type == "next_step":
+        text = (body.text or "").strip()
+        if len(text) > APPLICATION_TEXT_MAX["next_step"]:
+            raise ApplicationError(f"next step must be at most {APPLICATION_TEXT_MAX['next_step']} characters")
+        event["text"] = text or None
+    elif body.type == "follow_up":
+        if body.date is None or not body.date.strip():
+            event["date"] = None
+        else:
+            iso, ok = parse_date(body.date.strip())
+            if not ok or iso != body.date.strip():
+                raise ApplicationError("follow-up date must be a real date written YYYY-MM-DD")
+            event["date"] = iso
+    elif body.type == "note":
+        text = (body.text or "").strip()
+        if not text:
+            raise ApplicationError("a note needs some text")
+        event["text"] = text
+    elif body.type == "unlink":
+        match = card.get("match")
+        if match is None or match["basis"] == "tracked_from_shortlist":
+            raise ApplicationError("this card has no automatic match to unlink", status=409)
+        if not isinstance(match.get("jobfinder_id"), int):
+            raise ApplicationError("the matched posting has no JobFinder id", status=409)
+        event["jobfinder_id"] = match["jobfinder_id"]
+    else:  # undo
+        if body.event_id not in {c["event_id"] for c in card["changes"]}:
+            raise ApplicationError("that change is not in force on this card", status=409)
+        event["undoes"] = body.event_id
+    return event
+
+
+def _require_local_write(request: Request) -> None:
+    """Guard for every route that writes to the state folder.
+
+    A browser page on another site can reach 127.0.0.1, so a write needs more
+    than being on localhost: the request must be JSON, must carry the custom
+    X-CN-Write header (which forces a CORS preflight that only our local
+    dashboard origins pass), and, when the browser sends an Origin, it must be
+    one of the local dashboard origins."""
+    origin = request.headers.get("origin")
+    if origin is not None and origin not in _LOCAL_ORIGINS:
+        raise HTTPException(status_code=403, detail="request origin is not allowed")
+    if request.headers.get("x-cn-write") != "1":
+        raise HTTPException(status_code=403, detail="missing X-CN-Write header")
+    content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if content_type != "application/json":
+        raise HTTPException(status_code=415, detail="content type must be application/json")
+
+
+def create_app(source_path=None, policy=None, db_path=None,
+               reload_interval=None, task_check=None, state_dir=None,
+               tracker_path=None) -> FastAPI:
     """Build the API. Live mode when db_path is given, else when the
     JOBFINDER_DB_PATH env var is set and non-empty; otherwise synthetic
-    mode. An explicit db_path wins over the env var."""
+    mode. An explicit db_path wins over the env var.
+
+    reload_interval: seconds between database watcher ticks (live mode only;
+    0 disables the watcher). Defaults to CN_RELOAD_INTERVAL_SECONDS or 300.
+    task_check: callable returning True/False/None for "is the JobFinder
+    scheduled task running"; defaults to freshness.task_running.
+    state_dir: folder for Kyle's local decision logs (duplicate_resolutions.jsonl
+    and later workstreams'). Defaults to CN_STATE_DIR, then ~/career-navigator-state
+    in live mode; the synthetic backend has none and cannot write.
+    tracker_path: Kyle's job_tracker.csv (read only, never written). Defaults
+    to CN_TRACKER_CSV, then ~/job-search/job_tracker.csv in live mode when it exists.
+    """
     resolved_db = db_path or os.environ.get("JOBFINDER_DB_PATH") or None
+    if reload_interval is None:
+        try:
+            reload_interval = float(os.environ.get("CN_RELOAD_INTERVAL_SECONDS", "300"))
+        except ValueError:
+            reload_interval = 300.0
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # Startup fails closed in live mode: a bad database halts startup
         # instead of serving an empty or degraded snapshot (S5).
+        _backup_state(app)
         _reload(app)
-        yield
+        stop = None
+        if app.state.db_path is not None and app.state.reload_interval > 0:
+            stop = threading.Event()
+            thread = threading.Thread(
+                target=_watch_loop,
+                args=(app, app.state.reload_interval, stop),
+                name="cn-db-watch",
+                daemon=True,
+            )
+            app.state.watch_thread = thread
+            thread.start()
+        try:
+            yield
+        finally:
+            if stop is not None:
+                stop.set()
+                app.state.watch_thread.join(timeout=2)
 
     app = FastAPI(title="Career Navigator API", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
@@ -244,6 +765,24 @@ def create_app(source_path=None, policy=None, db_path=None) -> FastAPI:
     app.state.source_path = source_path or default_source_path()
     app.state.db_path = resolved_db
     app.state.snapshot = None
+    app.state.reload_interval = float(reload_interval)
+    app.state.task_check = task_check or freshness.task_running
+    app.state.reload_lock = threading.Lock()
+    app.state.last_probe = None
+    app.state.consecutive_probe_failures = 0
+    app.state.last_auto_reload = None
+    app.state.auto_reload_error = None
+    app.state.watch_thread = None
+    app.state.state_dir = resolve_state_dir(state_dir, live=resolved_db is not None)
+    app.state.last_backup = None
+    app.state.backup_error = None
+    app.state.resolutions = DuplicateResolutions(app.state.state_dir)
+    app.state.reviews = ReviewDecisions(app.state.state_dir)
+    app.state.view_cache = None
+    app.state.applications = Applications(app.state.state_dir)
+    app.state.tracker_path = resolve_tracker_path(tracker_path, live=resolved_db is not None)
+    app.state.tracker_cache = None
+    app.state.board_cache = None
 
     @app.get("/health")
     def health() -> dict:
@@ -269,49 +808,63 @@ def create_app(source_path=None, policy=None, db_path=None) -> FastAPI:
             if degraded:
                 body["degraded"] = True
                 body["last_error"] = live_health.get("last_error")
+            body["freshness"] = _freshness_block(app, snapshot)
         return body
 
     @app.get("/api/jobs")
     def jobs() -> dict:
         _ensure_loaded(app)
         snapshot = app.state.snapshot
-        ranked = snapshot["ranked"]
-        return {
+        ranked = _served_view(app, snapshot).ranked
+        body = {
             "shortlist": [_ranked_result_to_dict(r) for r in ranked.shortlist],
             "review": [_ranked_result_to_dict(r) for r in ranked.review],
             "excluded": [_ranked_result_to_dict(r) for r in ranked.excluded],
-            "total": _totals(snapshot)["total"],
+            "total": _totals(snapshot, ranked)["total"],
             "refreshed_at": snapshot["refreshed_at"],
             "stale": _is_degraded(snapshot),
         }
+        if snapshot.get("source") == "live":
+            body["snapshot_provenance"] = _snapshot_provenance(snapshot)
+        return body
 
     @app.get("/api/jobs/shortlist")
     def shortlist() -> dict:
         _ensure_loaded(app)
         snapshot = app.state.snapshot
-        ranked = snapshot["ranked"]
-        return {
+        ranked = _served_view(app, snapshot).ranked
+        body = {
             "shortlist": [_ranked_result_to_dict(r) for r in ranked.shortlist],
             "total": len(ranked.shortlist),
             "refreshed_at": snapshot["refreshed_at"],
         }
+        if snapshot.get("source") == "live":
+            body["snapshot_provenance"] = _snapshot_provenance(snapshot)
+        return body
 
     @app.get("/api/jobs/{job_id}")
     def job_detail(job_id: str) -> dict:
         _ensure_loaded(app)
         snapshot = app.state.snapshot
-        result = snapshot["index"].get(job_id)
+        view = _served_view(app, snapshot)
+        # A posting folded away by a merge still resolves (its detail carries
+        # the duplicate_resolution that explains where it went).
+        result = view.index.get(job_id) or view.folded.get(job_id) or snapshot["index"].get(job_id)
         if result is None:
             raise HTTPException(status_code=404, detail="job not found")
-        return _ranked_result_to_dict(result)
+        body = _ranked_result_to_dict(result)
+        if snapshot.get("source") == "live":
+            body["snapshot_provenance"] = _snapshot_provenance(snapshot)
+        return body
 
     @app.get("/api/stats")
     def stats() -> dict:
         _ensure_loaded(app)
         snapshot = app.state.snapshot
         policy = app.state.policy
+        view = _served_view(app, snapshot)
         body = {
-            "totals": _totals(snapshot),
+            "totals": _totals(snapshot, view.ranked),
             "policy": {
                 "salary_floor_hourly": SALARY_FLOOR_HOURLY,
                 "salary_floor_annual": policy.salary_floor_annual,
@@ -334,10 +887,36 @@ def create_app(source_path=None, policy=None, db_path=None) -> FastAPI:
             }
             body["matrix"] = ingestion["matrix"]
             body["served"] = {
-                **_totals(snapshot),
-                "exact_duplicate_count_sum": _exact_duplicate_count_sum(snapshot),
+                **_totals(snapshot, view.ranked),
+                "exact_duplicate_count_sum": _exact_duplicate_count_sum(snapshot, view.ranked),
+            }
+            # Resolved counts sit next to (never inside) the raw ingestion
+            # numbers above. served_before_decisions is what would be served
+            # with the overlay off.
+            body["duplicates"] = {
+                **view.summary,
+                "served_before_decisions": _totals(snapshot),
+                "store": view.store,
+            }
+            # Phase 3c WS7: same idea for eligibility review decisions. The raw
+            # by_decision counts in "ingestion" never change; these are the
+            # counts after Kyle's passes and rejects.
+            review = view.review
+            moved_up = review.summary["passed"]
+            moved_out = review.summary["rejected"]
+            served = _totals(snapshot, view.ranked)
+            body["review_decisions"] = {
+                **review.summary,
+                "served_before_review_decisions": {
+                    "shortlist": served["shortlist"] - moved_up,
+                    "review": served["review"] + moved_up + moved_out,
+                    "excluded": served["excluded"] - moved_out,
+                    "total": served["total"],
+                },
+                "store": review.store,
             }
             body["staleness"] = _staleness(snapshot.get("health") or {})
+            body["freshness"] = _freshness_block(app, snapshot)
         return body
 
     @app.post("/api/refresh")
@@ -345,28 +924,293 @@ def create_app(source_path=None, policy=None, db_path=None) -> FastAPI:
         # Runtime refresh failure (S5): keep the last good snapshot, mark
         # health degraded, and answer 503. A refresh with no snapshot yet
         # has nothing to retain, so the load error propagates (fail closed).
-        if app.state.db_path is not None and app.state.snapshot is not None:
-            try:
-                _reload(app)
-            except LiveAdapterError as exc:
-                snapshot = app.state.snapshot
-                health = snapshot.get("health") or {}
-                health["degraded"] = True
-                health["last_error"] = str(exc)
-                health["error_time"] = datetime.now(timezone.utc).isoformat()
-                snapshot["health"] = health
-                return JSONResponse(
-                    status_code=503,
-                    content={
-                        "status": "degraded",
-                        "error": str(exc),
-                        "snapshot_refreshed_at": snapshot["refreshed_at"],
-                    },
-                )
-        else:
-            _reload(app)
+        ok, error = _safe_reload(app)
+        if not ok:
+            snapshot = app.state.snapshot
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "degraded",
+                    "error": error,
+                    "snapshot_refreshed_at": snapshot["refreshed_at"],
+                },
+            )
         snapshot = app.state.snapshot
-        return {"refreshed_at": snapshot["refreshed_at"], "totals": _totals(snapshot)}
+        return {
+            "refreshed_at": snapshot["refreshed_at"],
+            "totals": _totals(snapshot, _served_view(app, snapshot).ranked),
+        }
+
+    @app.get("/api/duplicates")
+    def duplicates() -> dict:
+        _ensure_loaded(app)
+        snapshot = app.state.snapshot
+        view = _served_view(app, snapshot)
+        return {
+            "enabled": app.state.resolutions.enabled,
+            "groups": list(view.groups),
+            "summary": view.summary,
+            "store": view.store,
+            "refreshed_at": snapshot["refreshed_at"],
+            "stale": _is_degraded(snapshot),
+        }
+
+    # The guard is a route dependency so it runs before the body is validated:
+    # a cross-site or non-JSON request is refused (403/415), never parsed.
+    @app.post("/api/duplicates/{fingerprint}/events", dependencies=[Depends(_require_local_write)])
+    def duplicate_event(fingerprint: str, body: DuplicateEventBody) -> dict:
+        resolutions = app.state.resolutions
+        if not resolutions.enabled:
+            raise HTTPException(status_code=503, detail="decisions are not saved in this mode (no state folder)")
+        if not _FINGERPRINT_RE.match(fingerprint):
+            raise HTTPException(status_code=404, detail="no such duplicate group")
+        _ensure_loaded(app)
+        # One writer at a time, and the group is looked up against the CURRENT
+        # snapshot under the lock: a decision is only ever recorded for a group
+        # that exists right now, with the member ids this backend computed
+        # (never ids supplied by the client).
+        with resolutions.write_lock:
+            snapshot = app.state.snapshot
+            view = _served_view(app, snapshot)
+            group = group_lookup(view).get(fingerprint)
+            if group is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="no such duplicate group in the current data (it may have changed; reload)",
+                )
+            try:
+                if body.type == "undo":
+                    if body.action is not None or body.kept_jobfinder_id is not None or body.note is not None:
+                        raise ResolutionError("undo takes no action, kept_jobfinder_id or note")
+                    event = resolutions.record_undo(fingerprint)
+                else:
+                    if body.action is None:
+                        raise ResolutionError("resolve needs an action: keep, merge or dismiss")
+                    event = resolutions.record_resolve(group, body.action, body.kept_jobfinder_id, body.note)
+            except ResolutionError as exc:
+                raise HTTPException(status_code=exc.status, detail=str(exc))
+            view = _served_view(app, snapshot)
+        return {
+            "event": event,
+            "group": next((g for g in view.groups if g["fingerprint"] == fingerprint), None),
+            "summary": view.summary,
+            "totals": _totals(snapshot, view.ranked),
+        }
+
+    @app.get("/api/review")
+    def review_log() -> dict:
+        """Review decisions in force or set aside, newest first (Audit tab)."""
+        _ensure_loaded(app)
+        snapshot = app.state.snapshot
+        view = _served_view(app, snapshot)
+        return {
+            "enabled": app.state.reviews.enabled,
+            "decisions": list(view.review.audit),
+            "summary": view.review.summary,
+            "store": view.review.store,
+            "refreshed_at": snapshot["refreshed_at"],
+            "stale": _is_degraded(snapshot),
+        }
+
+    @app.post("/api/jobs/{job_id}/review", dependencies=[Depends(_require_local_write)])
+    def review_event(job_id: str, body: ReviewEventBody) -> dict:
+        reviews = app.state.reviews
+        if not reviews.enabled:
+            raise HTTPException(status_code=503, detail="decisions are not saved in this mode (no state folder)")
+        if not _API_ID_RE.match(job_id):
+            raise HTTPException(status_code=404, detail="job not found")
+        _ensure_loaded(app)
+        # One writer at a time; the posting is looked up in the CURRENT served
+        # data under the lock, so a decision is only recorded for a posting that
+        # is in the queue right now, with ids and fingerprint this backend
+        # computed (never values supplied by the client).
+        with reviews.write_lock:
+            snapshot = app.state.snapshot
+            view = _served_view(app, snapshot)
+            result = view.index.get(job_id)
+            if result is None:
+                raise HTTPException(status_code=404, detail="job not found (it may have changed; reload)")
+            try:
+                if body.type == "undo":
+                    if body.verdict is not None or body.note is not None:
+                        raise ReviewError("undo takes no verdict or note")
+                    # Undo works on the raw review reasons even when a decision has
+                    # moved the posting out of the review list.
+                    event = reviews.record_undo(result, body.reason)
+                else:
+                    if body.verdict is None:
+                        raise ReviewError("decide needs a verdict: pass or reject")
+                    event = reviews.record_decide(result, job_id, body.reason, body.verdict, body.note)
+            except ReviewError as exc:
+                raise HTTPException(status_code=exc.status, detail=str(exc))
+            view = _served_view(app, snapshot)
+        served = view.index.get(job_id)
+        return {
+            "event": event,
+            "job": _ranked_result_to_dict(served) if served is not None else None,
+            "summary": view.review.summary,
+            "totals": _totals(snapshot, view.ranked),
+        }
+
+    # ----- Phase 3c WS4: applications board --------------------------------
+
+    def _board_payload(request: Request) -> dict:
+        board, tracker, _state, store, tracker_error = _board(app)
+        local = _is_local_client(request)
+        return {
+            "enabled": app.state.applications.enabled,
+            "available": tracker is not None,
+            "tracker": None if app.state.tracker_path is None else {
+                "file": app.state.tracker_path.name,
+                "rows": len(tracker.rows) if tracker else 0,
+                "sha256": tracker.sha256 if tracker else None,
+                "encoding": tracker.encoding if tracker else None,
+                "problems": list(tracker.problems) if tracker else [],
+                "error": tracker_error,
+                "baseline_export": board.baseline_export,
+            },
+            "statuses": list(TRACKER_STATUSES),
+            "columns": list(board.columns),
+            "cards": [_public_card(c, local) for c in board.cards],
+            "next_steps": list(board.next_steps),
+            "tracked_job_ids": board.tracked_job_ids,
+            "summary": board.summary,
+            "store": store,
+            "private_fields_served": local,
+            "refreshed_at": app.state.snapshot["refreshed_at"],
+        }
+
+    @app.get("/api/applications")
+    def applications_board(request: Request) -> dict:
+        return _board_payload(request)
+
+    def _require_applications():
+        if not app.state.applications.enabled:
+            raise HTTPException(status_code=503, detail="changes are not saved in this mode (no state folder)")
+
+    @app.post("/api/applications/{card_id}/events", dependencies=[Depends(_require_local_write)])
+    def application_event(card_id: str, body: ApplicationEventBody, request: Request) -> dict:
+        _require_applications()
+        if not _API_ID_RE.match(card_id):
+            raise HTTPException(status_code=404, detail="no such card")
+        applications = app.state.applications
+        # One writer at a time; the card is looked up in the CURRENT board under
+        # the lock, and its event key and match come from this backend.
+        with applications.write_lock:
+            board, *_ = _board(app)
+            card = board.by_id.get(card_id)
+            if card is None:
+                raise HTTPException(status_code=404, detail="no such card (the tracker may have changed; reload)")
+            try:
+                event = _application_event(card, body)
+                saved = applications.append(event)
+            except ApplicationError as exc:
+                raise HTTPException(status_code=exc.status, detail=str(exc))
+            board, *_ = _board(app)
+        updated = board.by_id.get(card_id)
+        return {
+            "event": {k: v for k, v in saved.items() if k != "text"},
+            "card": _public_card(updated, _is_local_client(request)) if updated else None,
+            "summary": board.summary,
+        }
+
+    @app.post("/api/jobs/{job_id}/track", dependencies=[Depends(_require_local_write)])
+    def track_job(job_id: str, body: TrackBody, request: Request) -> dict:
+        _require_applications()
+        if not _API_ID_RE.match(job_id):
+            raise HTTPException(status_code=404, detail="job not found")
+        applications = app.state.applications
+        with applications.write_lock:
+            board, *_ = _board(app)
+            view = _served_view(app, app.state.snapshot)
+            result = view.index.get(job_id)
+            if result is None:
+                raise HTTPException(status_code=404, detail="job not found (it may have changed; reload)")
+            if job_id in board.tracked_job_ids:
+                raise HTTPException(status_code=409, detail="this job is already on the applications board")
+            upstream = result.contract.upstream_records or {}
+            jobfinder_id = upstream.get("id")
+            if not isinstance(jobfinder_id, int) or isinstance(jobfinder_id, bool):
+                raise HTTPException(status_code=409, detail="this job has no JobFinder id, so it cannot be tracked")
+            posting = result.contract.posting or {}
+            family = str(upstream.get("family") or "")
+            try:
+                saved = applications.append({
+                    "type": "track",
+                    "app_key": f"job:{jobfinder_id}",
+                    "jobfinder_id": jobfinder_id,
+                    "api_id": job_id,
+                    "title": str(posting.get("title", ""))[:300],
+                    "company": str(posting.get("company", ""))[:300],
+                    "location": str(posting.get("location", ""))[:300],
+                    "pay": str(result.contract.pay.raw or "")[:200],
+                    "category": category_label(family) if family else "",
+                    "url": str(result.contract.source.get("url", ""))[:2000],
+                })
+            except ApplicationError as exc:
+                raise HTTPException(status_code=exc.status, detail=str(exc))
+            board, *_ = _board(app)
+        card_id = board.tracked_job_ids.get(job_id)
+        card = board.by_id.get(card_id) if card_id else None
+        return {"event": saved, "card": _public_card(card, _is_local_client(request)) if card else None,
+                "summary": board.summary}
+
+    @app.get("/api/applications/export/preview")
+    def export_preview(request: Request) -> dict:
+        board, tracker, state, _store, tracker_error = _board(app)
+        if tracker is None:
+            raise HTTPException(status_code=409, detail=tracker_error or "no tracker file is configured")
+        _header, rows, changes = export_rows(tracker, board)
+        if not _is_local_client(request):
+            for change in changes:
+                for column in change["columns"]:
+                    if column["private"]:
+                        column["before"] = column["after"] = None
+        return {
+            "enabled": app.state.applications.enabled,
+            "token": export_token(tracker, state),
+            "rows": len(rows),
+            "tracker_rows": len(tracker.rows),
+            "changed_rows": sum(1 for c in changes if not c["new_row"]),
+            "new_rows": sum(1 for c in changes if c["new_row"]),
+            "changes": changes,
+            "original": {"file": tracker.path.name, "sha256": tracker.sha256},
+            "folder": str(app.state.applications.export_dir) if app.state.applications.enabled else None,
+        }
+
+    @app.post("/api/applications/export", dependencies=[Depends(_require_local_write)])
+    def export_tracker(body: ExportBody) -> dict:
+        _require_applications()
+        applications = app.state.applications
+        with applications.write_lock:
+            board, tracker, state, _store, tracker_error = _board(app)
+            if tracker is None:
+                raise HTTPException(status_code=409, detail=tracker_error or "no tracker file is configured")
+            if body.token != export_token(tracker, state):
+                raise HTTPException(status_code=409, detail="the tracker or your changes moved since the preview; preview again")
+            header, rows, changes = export_rows(tracker, board)
+            try:
+                written = write_export(tracker.path, applications.export_dir, header, rows)
+                applications.append({
+                    "type": "export", "file": written["file"], "sha256": written["sha256"],
+                    "rows": written["rows"], "original_sha256": written["original_sha256"],
+                    "changed_rows": sum(1 for c in changes if not c["new_row"]),
+                    "new_rows": sum(1 for c in changes if c["new_row"]),
+                })
+            except (ApplicationError, TrackerError) as exc:
+                status = exc.status if isinstance(exc, ApplicationError) else 409
+                raise HTTPException(status_code=status, detail=str(exc))
+            board, *_ = _board(app)
+        return {
+            "file": written["file"], "path": written["path"], "sha256": written["sha256"],
+            "rows": written["rows"], "original_sha256": written["original_sha256"],
+            "original_unchanged": written["original_sha256"] == tracker.sha256,
+            "summary": board.summary,
+        }
+
+    @app.get("/api/gate")
+    def gate() -> dict:
+        return _read_gate_summary(os.environ.get("CN_GATE_REPORTS_DIR"))
 
     return app
 
