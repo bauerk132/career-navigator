@@ -20,6 +20,8 @@ from career_navigator import applications as ap
 from career_navigator import tracker_adapter as ta
 from career_navigator.app import create_app, job_id
 
+from state_helpers import read_events
+
 from test_live_wiring import _write_db
 from test_review_decisions import _fixture_rows
 
@@ -201,10 +203,7 @@ class ApiBase(unittest.TestCase):
         return r.json()
 
     def log_lines(self):
-        path = self.state_dir / ap.APPLICATIONS_FILENAME
-        if not path.exists():
-            return []
-        return [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x]
+        return read_events(self.state_dir, "applications")
 
 
 class BoardTests(ApiBase):

@@ -36,7 +36,8 @@ from datetime import datetime, timezone
 
 from .duplicate_resolutions import _annotated
 from .ranking import RankedResult, RankedResults, _sort_key, final_classification
-from .state_store import JsonlLog, StateError
+from .sqlite_log import SqliteLog
+from .state_store import StateError
 
 REVIEW_FILENAME = "review_decisions.jsonl"
 EVENT_VERSION = 1
@@ -207,7 +208,7 @@ class ReviewDecisions:
 
     def __init__(self, state_dir):
         self.enabled = state_dir is not None
-        self._log = JsonlLog(state_dir / REVIEW_FILENAME) if self.enabled else None
+        self._log = SqliteLog(state_dir, "review_decisions", REVIEW_FILENAME) if self.enabled else None
         self.write_lock = threading.Lock()
 
     def state(self) -> ReviewState:

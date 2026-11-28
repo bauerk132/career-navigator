@@ -30,7 +30,8 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
 from .ranking import RankedResults
-from .state_store import JsonlLog, StateError
+from .sqlite_log import SqliteLog
+from .state_store import StateError
 
 RESOLUTIONS_FILENAME = "duplicate_resolutions.jsonl"
 EVENT_VERSION = 1
@@ -149,7 +150,7 @@ class DuplicateResolutions:
 
     def __init__(self, state_dir):
         self.enabled = state_dir is not None
-        self._log = JsonlLog(state_dir / RESOLUTIONS_FILENAME) if self.enabled else None
+        self._log = SqliteLog(state_dir, "duplicate_resolutions", RESOLUTIONS_FILENAME) if self.enabled else None
         self.write_lock = threading.Lock()
 
     def state(self) -> ResolutionState:

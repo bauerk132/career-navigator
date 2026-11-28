@@ -18,6 +18,8 @@ from career_navigator import duplicate_resolutions as dr
 from career_navigator.app import create_app
 from career_navigator.state_store import JsonlLog, StateError
 
+from state_helpers import db_exists, read_events
+
 from test_live_wiring import _details, _row, _write_db, build_845_db, build_845_rows
 
 WRITE = {"X-CN-Write": "1"}
@@ -134,9 +136,7 @@ class ApiBase(unittest.TestCase):
         return self.state_dir / "duplicate_resolutions.jsonl"
 
     def log_lines(self):
-        if not self.log_path.exists():
-            return []
-        return [json.loads(line) for line in self.log_path.read_text(encoding="utf-8").splitlines() if line]
+        return read_events(self.state_dir, "duplicate_resolutions")
 
     def groups(self, client):
         return client.get("/api/duplicates").json()["groups"]
@@ -185,7 +185,7 @@ class QueueTests(ApiBase):
         self.assertEqual(stats["ingestion"]["by_duplicate_confidence"]["uncertain"], 118)
         self.assertEqual(stats["duplicates"]["served_before_decisions"]["total"], 688)
         self.assertEqual(stats["duplicates"]["folded_rows"], 0)
-        self.assertFalse(self.log_path.exists())
+        self.assertFalse(db_exists(self.state_dir))
 
 
 class DecisionTests(ApiBase):
@@ -370,7 +370,7 @@ class WriteRouteGuardTests(ApiBase):
         client = self.client()
         group = self.groups(client)[0]
         self.post(client, group["fingerprint"], {"type": "resolve", "action": "dismiss"})
-        self.assertEqual([p.name for p in self.state_dir.iterdir()], ["duplicate_resolutions.jsonl"])
+        self.assertEqual([p.name for p in self.state_dir.iterdir()], ["career-navigator.db"])
 
     def test_synthetic_backend_cannot_write(self):
         with mock.patch.dict("os.environ", {"JOBFINDER_DB_PATH": "", "CN_STATE_DIR": ""}):
@@ -396,13 +396,16 @@ class WriteRouteGuardTests(ApiBase):
 
 class DamagedFileTests(ApiBase):
     def test_garbage_lines_are_counted_and_the_rest_still_applies(self):
+        # A legacy JSONL file with a torn last line is imported on first use:
+        # the torn line is counted, never fatal, and later writes still apply.
+        self.state_dir.mkdir(parents=True)
+        self.log_path.write_bytes(b'{"torn":')
         client = self.client()
         group = self.groups(client)[0]
         self.post(client, group["fingerprint"], {"type": "resolve", "action": "merge",
                                                  "kept_jobfinder_id": group["members"][0]["jobfinder_id"]})
-        with open(self.log_path, "ab") as handle:
-            handle.write(b'{"torn":')
         self.post(client, self.groups(client)[1]["fingerprint"], {"type": "resolve", "action": "keep"})
+        self.assertEqual(self.log_path.read_bytes(), b'{"torn":')   # legacy file never modified
         client2 = self.client()
         stats = client2.get("/api/stats").json()
         self.assertEqual(stats["duplicates"]["store"]["skipped_lines"], 1)
