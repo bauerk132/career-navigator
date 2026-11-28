@@ -72,6 +72,7 @@ from .review_decisions import (
     build_review_view,
 )
 from .live_adapter import (
+    KNOWN_FEEDS,
     LiveAdapterError,
     evaluate_live_import,
     ingestion_summary,
@@ -162,7 +163,7 @@ def _snapshot_provenance(snapshot: dict) -> dict:
         ran_at = item.get("ran_at")
         if name and ran_at:
             # Only expose canonical feed IDs; never leak arbitrary DB values.
-            if name in {"indeed_email", "linkedin_email", "manual"}:
+            if name in KNOWN_FEEDS:
                 try:
                     parsed = parse_eastern(ran_at)
                     if parsed is None:
