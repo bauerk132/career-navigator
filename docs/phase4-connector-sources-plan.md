@@ -20,6 +20,8 @@ So the plan is a hand-off through a file:
 | 4a: a safety net | 1 JobFinder under git | JobFinder changes have a history and can be undone |
 | 4b: the pull | 2 Daily connector pull, 3 JobFinder connector source | Connector jobs show up in the 9 AM digest next to the email jobs, with pay filled in |
 | 4c: the dashboard | 4 Career Navigator and dashboard accept the new sources | The dashboard shows where each connector job came from instead of a generic "jobfinder" label |
+| 4d: suburbs | 5 Philadelphia suburbs | Jobs in close Philadelphia suburbs pass, and border towns land in Needs Review |
+| 4e: the check | 6 Two-week source comparison | A count of what the connectors found that the email alerts missed |
 
 WS4's code lands before WS3's source is switched on in the 9 AM run. That way no connector row ever reaches Career Navigator under a name it doesn't know.
 
@@ -31,7 +33,7 @@ Hard rules that carry over and apply to every workstream:
 4. The `jobs` table keeps its exact columns. `live_adapter.py:189` raises `SchemaDriftError` if a column is added or removed, so any schema change would take the dashboard down.
 5. Localhost only. Nothing public.
 
-**This plan changes JobFinder's code.** Phase 3 ruled that out (`career-navigator-dashboard/docs/phase3-scope-plan.md`, Out of scope). On Nov 1 Kyle also limited sources to alert emails and pasted links. Both need Kyle's sign-off before any of this is built. See Q1 and Q2.
+**This plan changes JobFinder's code.** Phase 3 ruled that out (`career-navigator-dashboard/docs/phase3-scope-plan.md`, Out of scope). On Nov 1 Kyle also limited sources to alert emails and pasted links, before the connectors were available. On Nov 28 Kyle said yes to both (Q1 and Q2). The email alerts stay on next to the connectors.
 
 ---
 
@@ -54,7 +56,7 @@ Hard rules that carry over and apply to every workstream:
 - `eligibility.py:53` excludes food roles (restaurant, general manager, shift leader and similar). JobFinder keeps them as the `food` family.
 
 **Dashboard repo**
-- `live_gate.py:838` `WS6_FEEDS` lists the allowed source names. A new name fails the gate check at `live_gate.py:883`.
+- `live_gate.py:838` `WS6_FEEDS` lists the allowed source names. The name comes from Phase 3's WS6, not this plan's. A new name fails the gate check at `live_gate.py:883`.
 - `mock_api.py` uses only the email source names in its sample jobs and its freshness stamps (`mock_api.py:98`).
 
 **What the connectors returned in test searches (Nov 28)**
@@ -142,6 +144,41 @@ After WS1. Needs the file shape from WS2.
 ### Dependencies and order
 After WS2, since the source names are fixed there. It must land before WS3 switches on the new sources (WS3 item 8). Its checks use the sample connector rows from WS3's tests, and then the first real rows.
 
+## Workstream 5: Philadelphia suburbs
+
+Kyle's rule (Q4): a Philadelphia suburb counts if it is under 30 minutes by transit to Center City. Towns near the line go to Needs Review. Pittsburgh is unchanged.
+
+### Scope
+1. **One town list, built once.** Each town gets a weekday morning transit time from its main station (SEPTA Regional Rail, the Market-Frankford Line, the Norristown High Speed Line or a trolley) to Suburban Station or City Hall, taken from the published schedules. No map service is called at run time.
+2. **Three bands.** Under 25 minutes passes. 25 to 35 minutes is the border and goes to Needs Review. Over 35 minutes stays out of area.
+3. **Kyle signs off on the list** before it goes into any code or config. Every time in it is marked **[unchecked]** until then.
+4. **JobFinder keeps the jobs.** Towns in the pass and border bands are added to the Philadelphia `nearby` list in `config.json`, so `match_city` (`normalize.py:82`) keeps them instead of rejecting them. This is a config change, not a code change, unless Q9 brings in New Jersey. Then `match_city` also needs to accept NJ for the listed towns.
+5. **Career Navigator sorts them.** `_location_reason` (`eligibility.py:320`) passes a pass-band town with the reason "Philadelphia suburb, under 30 minutes by transit". A border town gets `review` with the reason "Philadelphia suburb near the 30 minute line". The two lists live in `policy.py` next to `primary_cities` (`policy.py:33`). Town names match as whole words, so a town like Media doesn't match "social media".
+6. JobFinder's own digest shows border towns as normal matches. Only Career Navigator puts them in Needs Review.
+
+### Acceptance criteria
+- Tests: a pass-band town passes, a border town lands in Needs Review, a town over 35 minutes is out of area, and a word that only contains a town name doesn't match.
+- Pittsburgh results are unchanged.
+- Existing tests pass.
+
+### Dependencies and order
+After WS1. Can be built alongside WS3 and WS4. The list waits on Kyle's sign-off, and the New Jersey part waits on Q9.
+
+## Workstream 6: Two-week source comparison
+
+### Scope
+1. Two weeks after the connector sources switch on, count jobs by where they were found: only by a connector, only by an email alert, or by both (linked by `dup_of`).
+2. Also count how many of each source's jobs passed the filters and made the picks.
+3. Write the counts up in a short note for Kyle. It answers one question: should the Indeed email alerts stay on?
+4. The counts come from read-only queries on `jobfinder.db`. Nothing is changed.
+
+### Acceptance criteria
+- The note has the three counts for Indeed, and the connector-only count for ZipRecruiter.
+- Kyle decides whether to keep the Indeed alerts. The LinkedIn alerts stay either way, since no LinkedIn connector exists.
+
+### Dependencies and order
+Last. Starts two weeks after WS3 item 8.
+
 ---
 
 ## Out of scope for Phase 4
@@ -165,8 +202,9 @@ After WS2, since the source names are fixed there. It must land before WS3 switc
 | Two real postings share a company, title and city | They merge into one row | Accepted for connector rows. It is rare, and the newest link wins |
 | A posting carries instructions aimed at Claude | The task does something it shouldn't | The task writes one file only, with a fixed shape, and JobFinder checks every field (WS2, WS3) |
 | A new source name or column reaches Career Navigator unannounced | The dashboard shows "jobfinder" or fails to load | WS4 lands before WS3 switches on the new sources, and no column changes |
-| Connector jobs crowd out email jobs | Kyle's picks shift toward whatever the connectors return | Same quotas for all sources. Watch the first week's counts by source |
-| Many results are suburbs or New Jersey | Lots of rejected rows and few real gains | Q4 decides whether to widen the city lists |
+| Connector jobs crowd out email jobs | Kyle's picks shift toward whatever the connectors return | Same quotas for all sources. The two-week counts show it (WS6) |
+| Many results are suburbs or New Jersey | Lots of rejected rows and few real gains | Philadelphia suburbs under 30 minutes by transit now count (WS5). Q9 decides New Jersey |
+| A transit time in the town list is wrong | A job is kept or dropped by mistake | Kyle signs off on the list before it goes in, and towns near the line go to Needs Review (WS5) |
 | ZipRecruiter limit of 5 results per search | Thin results from ZipRecruiter | Q6 decides whether to link the account |
 | A connector's terms limit automated use | The pull breaks a site's rules | Check both connectors' terms before WS2 starts **[unchecked]** (Q7) |
 | JobFinder has no history today | A bad change can't be rolled back | WS1 first |
@@ -175,14 +213,15 @@ After WS2, since the source names are fixed there. It must land before WS3 switc
 
 | # | Question | Default if Kyle agrees | Where it lands |
 |---|---|---|---|
-| Q1 | On Nov 1 you limited sources to alert emails and pasted links. Is it OK to add the two connectors? | Yes, both connectors | Whole plan |
-| Q2 | Phase 3 ruled out changes to JobFinder's code, config or schedule. Phase 4 changes its code and `.gitignore` and adds a second scheduled task. Is that OK? | Yes, limited to WS1, WS2 and WS3 | WS1, WS2, WS3 |
-| Q3 | Should JobFinder get a private GitHub repo, or stay local with git only? | Private GitHub repo | WS1 |
-| Q4 | Should suburbs and New Jersey count? Today only Pittsburgh and Philadelphia in PA pass. | Leave as is for the first week, then look at what was rejected | WS3 |
-| Q5 | Career Navigator excludes food roles but JobFinder keeps them. Should the pull search food roles too? | Yes, so the JobFinder digest stays the same as today. Career Navigator still hides them | WS2 |
-| Q6 | Should you link your ZipRecruiter account to get more than 5 results per search? | Yes | WS2 |
-| Q7 | Should we follow Indeed's short links to get the real `jk=` job key? This may run against Indeed's terms. | No, use source plus `dup_key` instead | WS3 |
-| Q8 | JobsPipe is also connected and searches 30+ job boards, but each match costs a credit. Add it now? | No, look again after the first two are running | Out of scope |
+| Q1 | On Nov 1 you limited sources to alert emails and pasted links. Is it OK to add the two connectors? | **Decided Nov 28: yes, both connectors, next to the email alerts** | Whole plan |
+| Q2 | Phase 3 ruled out changes to JobFinder's code, config or schedule. Phase 4 changes its code and `.gitignore` and adds a second scheduled task. Is that OK? | **Decided Nov 28: yes, limited to WS1, WS2 and WS3** | WS1, WS2, WS3 |
+| Q3 | Should JobFinder get a private GitHub repo, or stay local with git only? | **Decided Nov 28: private GitHub repo** | WS1 |
+| Q4 | Should suburbs and New Jersey count? Today only Pittsburgh and Philadelphia in PA pass. | **Decided Nov 28: Philadelphia suburbs count if they are under 30 minutes by transit to Center City. Border towns go to Needs Review. Pittsburgh stays as is** | WS5 |
+| Q5 | Career Navigator excludes food roles but JobFinder keeps them. Should the pull search food roles too? | **Decided Nov 28: yes.** The JobFinder digest stays the same as today, and Career Navigator still hides them | WS2 |
+| Q6 | Should you link your ZipRecruiter account to get more than 5 results per search? | **Decided Nov 28: yes. Kyle links it from Claude's connector settings** | WS2 |
+| Q7 | Should we follow Indeed's short links to get the real `jk=` job key? This may run against Indeed's terms. | **Decided Nov 28: no. Nothing in Phase 4 goes against Indeed's terms.** Use source plus `dup_key` instead | WS3 |
+| Q8 | JobsPipe is also connected and searches 30+ job boards, but each match costs a credit. Add it now? | **Decided Nov 28: no, not now** | Out of scope |
+| Q9 | Several New Jersey towns, such as Camden and Collingswood, are close to Center City on PATCO. Do they count under the same 30 minute rule? | Yes, same rule as PA suburbs | WS5 |
 
 ### Smaller defaults the build can settle (no decision needed from Kyle)
 - Pull time: 8:30 AM ET, 30 minutes before JobFinder's 9 AM run.
